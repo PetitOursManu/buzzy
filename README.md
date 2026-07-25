@@ -1,5 +1,7 @@
 # 🐝 Buzzy
 
+![Aperçu de Buzzy — page Découverte d'événements](docs/buzzy.png)
+
 **Buzzy** est une application web *self-hosted* qui vous aide à :
 
 1. **Découvrir des événements** mondiaux, nationaux, régionaux et locaux, classés par thème, générés par une IA que vous connectez dans les paramètres.
