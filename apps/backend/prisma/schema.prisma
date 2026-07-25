@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model AiProvider {
+  id              String   @id @default(cuid())
+  name            String
+  baseUrl         String
+  apiKeyEncrypted String
+  selectedModel   String?
+  reasoningEffort String? // null|"none"|"low"|"medium"|"high" — envoyé si supporté
+  updatedAt       DateTime @updatedAt
+}
+
+model UserProfile {
+  id                String   @id @default(cuid())
+  description       String
+  tone              String // "professionnel" | "chaleureux" | "humoristique" | "institutionnel"
+  targetAudience    String?
+  restrictions      String?
+  preferredNetworks String[] // réseaux pour lesquels générer une description par événement
+  updatedAt         DateTime @updatedAt
+}
+
+model McpServer {
+  id         String   @id @default(cuid())
+  name       String
+  url        String
+  authHeader String? // stocké chiffré si non vide (même mécanisme que apiKeyEncrypted)
+  enabled    Boolean  @default(false)
+  preset     String? // "brave" | "tavily" | "bright-data" | "searxng" | "custom"
+  createdAt  DateTime @default(now())
+}
+
+enum EventScope {
+  GLOBAL
+  NATIONAL
+  REGIONAL
+  LOCAL
+}
+
+model Event {
+  id          String     @id @default(cuid())
+  title       String
+  description String
+  scope       EventScope
+  region      String?
+  theme       String
+  eventDate   DateTime?
+  eventPeriod String? // ex: "Juin 2026" si pas de date précise
+  sources     Json // [{ title: string, url: string }]
+  networkDescriptions Json? // { facebook: string, instagram: string, ... } par réseau préféré
+  verified    Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  posts       Post[]
+}
+
+model PostPlan {
+  id        String   @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  frequency Json // { type: "day"|"week"|"month", count: number }
+  networks  String[] // ["facebook","instagram","linkedin","x","tiktok"]
+  createdAt DateTime @default(now())
+  posts     Post[]
+}
+
+enum PostStatus {
+  DRAFT
+  APPROVED
+  PUBLISHED
+}
+
+model Post {
+  id             String     @id @default(cuid())
+  postPlanId     String
+  postPlan       PostPlan   @relation(fields: [postPlanId], references: [id], onDelete: Cascade)
+  scheduledDate  DateTime
+  network        String
+  title          String
+  content        String
+  hashtags       String[]
+  relatedEventId String?
+  relatedEvent   Event?     @relation(fields: [relatedEventId], references: [id])
+  status         PostStatus @default(DRAFT)
+  createdAt      DateTime   @default(now())
+}

@@ -1,0 +1,23 @@
+{
+  "name": "buzzy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Buzzy — Découverte d'événements et génération de calendriers éditoriaux assistée par IA",
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w apps/backend\" \"npm run dev -w apps/frontend\"",
+    "build": "npm run build -w apps/frontend && npm run build -w apps/backend",
+    "start": "npm run start -w apps/backend",
+    "prisma:generate": "npm run prisma:generate -w apps/backend",
+    "prisma:migrate": "npm run prisma:migrate -w apps/backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

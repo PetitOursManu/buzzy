@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────
+# Buzzy — docker-compose
+# Démarrage : docker compose up -d --build
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://buzzy:buzzy@db:5432/buzzy}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-bytes-long-secret!!}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      PORT: 3000
+      NODE_ENV: production
+    ports:
+      - '3000:3000'
+    # ─── Exemple Traefik pour un déploiement Coolify (à adapter/décommenter) ───
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.buzzy.rule=Host(`buzzy.exemple.com`)"
+    #   - "traefik.http.routers.buzzy.entrypoints=websecure"
+    #   - "traefik.http.routers.buzzy.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.buzzy.loadbalancer.server.port=3000"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-buzzy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-buzzy}
+      POSTGRES_DB: ${POSTGRES_DB:-buzzy}
+    volumes:
+      - buzzy_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-buzzy} -d ${POSTGRES_DB:-buzzy}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─────────────────────────────────────────────────────────────────
+  # OPTIONNEL — Recherche web MCP 100% gratuite et auto-hébergée.
+  # Décommentez ce bloc, lancez `docker compose up -d`, puis ajoutez
+  # http://searxng-mcp:3000/mcp comme serveur MCP personnalisé dans
+  # les Paramètres > Recherche Web (MCP) de Buzzy, et activez-le.
+  # ─────────────────────────────────────────────────────────────────
+  # searxng:
+  #   image: searxng/searxng:latest
+  #   restart: unless-stopped
+  #   environment:
+  #     SEARXNG_BASE_URL: http://searxng:8080/
+  #     # Activez le format JSON dans searxng/settings.yml (formats: [html, json])
+  #   volumes:
+  #     - buzzy_searxng_config:/etc/searxng
+  #
+  # searxng-mcp:
+  #   # Wrapper MCP HTTP autour de SearXNG (ex: image communautaire mcp-searxng).
+  #   # Adaptez l'image et le port selon le wrapper choisi.
+  #   image: isokoliuk/mcp-searxng:latest
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - searxng
+  #   environment:
+  #     SEARXNG_URL: http://searxng:8080
+  #     MCP_HTTP_PORT: 3000
+  #   # Le port n'a pas besoin d'être exposé à l'hôte : Buzzy y accède via
+  #   # le réseau interne Docker (http://searxng-mcp:3000/mcp).
+
+volumes:
+  buzzy_postgres_data:
+  # buzzy_searxng_config:

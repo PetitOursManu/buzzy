@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────
+# Override local — recherche web MCP 100% gratuite et auto-hébergée.
+#
+# Ce fichier est chargé AUTOMATIQUEMENT par `docker compose up` en plus
+# de docker-compose.yml. Il ajoute deux services (searxng + searxng-mcp)
+# et indique à Buzzy leur adresse via SEARXNG_MCP_URL : au démarrage,
+# Buzzy pré-enregistre le serveur MCP (désactivé). Il suffit alors de
+# l'activer dans Paramètres → Recherche Web (MCP).
+#
+# Pour un déploiement SANS recherche web auto-hébergée, supprimez ou
+# renommez ce fichier (ex : docker-compose.override.yml.disabled).
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    environment:
+      # Adresse interne du wrapper MCP (réseau Docker). Pré-enregistrée
+      # automatiquement dans Buzzy au premier démarrage.
+      SEARXNG_MCP_URL: http://searxng-mcp:8000/mcp
+    depends_on:
+      db:
+        condition: service_healthy
+      searxng-mcp:
+        condition: service_started
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    expose:
+      - '8080'
+
+  searxng-mcp:
+    build:
+      context: .
+      dockerfile: searxng-mcp/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - searxng
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      MCP_PORT: '8000'
+    expose:
+      - '8000'
+    # Port exposé à l'hôte uniquement pour diagnostic manuel (optionnel).
+    ports:
+      - '8899:8000'

@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+**/build
+.git
+.gitignore
+.env
+.env.local
+*.log
+README.md
+.vite
+coverage

@@ -1,0 +1,21 @@
+# Configuration SearXNG pour Buzzy (recherche web MCP auto-hébergée).
+# L'essentiel : activer le format JSON pour que le wrapper MCP puisse
+# consommer les résultats de recherche.
+use_default_settings: true
+
+server:
+  # Clé secrète (à regénérer pour un usage sérieux : openssl rand -hex 32)
+  secret_key: 'ed6227205f0658e8fdd96948de570c1ec7657708c27cfe38c003ac5a7fdaae54'
+  limiter: false
+  image_proxy: true
+
+search:
+  # Formats de sortie autorisés — 'json' est requis par le wrapper MCP.
+  formats:
+    - html
+    - json
+  autocomplete: ''
+  default_lang: 'fr'
+
+ui:
+  static_use_hash: true
