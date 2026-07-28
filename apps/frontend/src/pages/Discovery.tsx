@@ -63,8 +63,45 @@ function eventTime(e: EventItem): number {
   return pt ?? Number.POSITIVE_INFINITY;
 }
 
-function sortEventsByDate(list: EventItem[]): EventItem[] {
-  return [...list].sort((a, b) => eventTime(a) - eventTime(b));
+type SortMode = 'date-asc' | 'date-desc' | 'theme' | 'scope' | 'title' | 'verified';
+
+const SORT_OPTIONS: { value: SortMode; label: string }[] = [
+  { value: 'date-asc', label: 'Date — au plus tôt' },
+  { value: 'date-desc', label: 'Date — au plus tard' },
+  { value: 'theme', label: 'Thème (A→Z)' },
+  { value: 'scope', label: 'Portée (Mondial→Local)' },
+  { value: 'title', label: 'Titre (A→Z)' },
+  { value: 'verified', label: 'Sources vérifiées d\'abord' },
+];
+
+const SCOPE_RANK: Record<EventScope, number> = { GLOBAL: 0, NATIONAL: 1, REGIONAL: 2, LOCAL: 3 };
+
+function sortEvents(list: EventItem[], mode: SortMode): EventItem[] {
+  const arr = [...list];
+  switch (mode) {
+    case 'date-asc':
+      return arr.sort((a, b) => eventTime(a) - eventTime(b));
+    case 'date-desc':
+      return arr.sort((a, b) => {
+        const ta = eventTime(a);
+        const tb = eventTime(b);
+        // Les événements sans date exploitable restent toujours en fin de liste.
+        if (ta === Infinity && tb === Infinity) return 0;
+        if (ta === Infinity) return 1;
+        if (tb === Infinity) return -1;
+        return tb - ta;
+      });
+    case 'theme':
+      return arr.sort((a, b) => a.theme.localeCompare(b.theme, 'fr'));
+    case 'scope':
+      return arr.sort((a, b) => SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || eventTime(a) - eventTime(b));
+    case 'title':
+      return arr.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+    case 'verified':
+      return arr.sort((a, b) => (a.verified === b.verified ? 0 : a.verified ? -1 : 1));
+    default:
+      return arr;
+  }
 }
 
 export function DiscoveryPage() {
@@ -79,6 +116,7 @@ export function DiscoveryPage() {
   const [customTheme, setCustomTheme] = usePersistentState<string>('buzzy-f-customTheme', '');
   const [priorityThemes, setPriorityThemes] = usePersistentState<string[]>('buzzy-f-priority', []);
   const [planningEnabled, setPlanningEnabled] = usePersistentState<boolean>('buzzy-f-planning', false);
+  const [sortMode, setSortMode] = usePersistentState<SortMode>('buzzy-f-sort', 'date-asc');
 
   const [dateMode, setDateMode] = usePersistentState<DateMode>('buzzy-f-dateMode', 'month');
   const [month, setMonth] = usePersistentState<number>('buzzy-f-month', now.getMonth() + 1);
@@ -199,8 +237,8 @@ export function DiscoveryPage() {
   const isFirstGen = generate.isPending && generate.variables?.mode === 'new';
   const isMoreGen = generate.isPending && generate.variables?.mode === 'more';
 
-  // Affichage trié par date (chronologique).
-  const sortedEvents = useMemo(() => sortEventsByDate(events), [events]);
+  // Affichage trié selon le mode choisi.
+  const sortedEvents = useMemo(() => sortEvents(events, sortMode), [events, sortMode]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -402,6 +440,29 @@ export function DiscoveryPage() {
         </div>
       )}
 
+      {/* ─── Barre de tri ─── */}
+      {!isFirstGen &&
+        !plan.isPending &&
+        (events.length > 0 || (historyQuery.data?.events?.length ?? 0) > 0) && (
+          <div className="flex items-center justify-end gap-2">
+            <label htmlFor="sort-mode" className="text-sm text-muted">
+              Trier par :
+            </label>
+            <select
+              id="sort-mode"
+              className="glass-input !w-auto !py-1.5 text-sm"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
       {/* ─── Grille de résultats ─── */}
       {isFirstGen ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -436,7 +497,7 @@ export function DiscoveryPage() {
 
           {events.length === 0 && !plan.isPending && (
             <HistoryOrEmpty
-              history={sortEventsByDate(historyQuery.data?.events ?? [])}
+              history={sortEvents(historyQuery.data?.events ?? [], sortMode)}
               loading={historyQuery.isLoading}
               onToggle={toggle}
               selectedIds={selectedIds}
