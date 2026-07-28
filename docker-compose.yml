@@ -1,6 +1,16 @@
 # ─────────────────────────────────────────────────────────────────
-# Buzzy — docker-compose
-# Démarrage : docker compose up -d --build
+# Buzzy — docker-compose (production / Coolify)
+#
+# • Déploiement Coolify : ce fichier suffit. Coolify utilise UNIQUEMENT
+#   docker-compose.yml (il n'applique pas docker-compose.override.yml).
+#   La variable magique SERVICE_FQDN_APP_3000 fait générer un domaine
+#   à Coolify et configure automatiquement le reverse-proxy vers le
+#   port 3000. Renseignez les secrets (JWT_SECRET, ENCRYPTION_KEY,
+#   ADMIN_PASSWORD, POSTGRES_PASSWORD…) dans l'UI Coolify.
+#
+# • Développement local : `docker compose up -d --build` fusionne
+#   automatiquement docker-compose.override.yml, qui publie le port
+#   3000 sur l'hôte et ajoute la recherche web SearXNG.
 # ─────────────────────────────────────────────────────────────────
 
 services:
@@ -13,6 +23,9 @@ services:
       db:
         condition: service_healthy
     environment:
+      # Coolify : génère un domaine et route le proxy vers le port 3000.
+      # Sans Coolify, cette variable reste vide et est ignorée.
+      SERVICE_FQDN_APP_3000: ''
       DATABASE_URL: ${DATABASE_URL:-postgresql://buzzy:buzzy@db:5432/buzzy}
       JWT_SECRET: ${JWT_SECRET:-change-me}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-bytes-long-secret!!}
@@ -20,9 +33,23 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       PORT: 3000
       NODE_ENV: production
-    ports:
-      - '3000:3000'
-    # ─── Exemple Traefik pour un déploiement Coolify (à adapter/décommenter) ───
+    # Port interne exposé au réseau Docker / au proxy Coolify (pas à l'hôte).
+    expose:
+      - '3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    # ─── Alternative sans la variable magique : labels Traefik ────────
+    # (à décommenter et adapter le domaine si vous gérez le proxy vous-même)
     # labels:
     #   - "traefik.enable=true"
     #   - "traefik.http.routers.buzzy.rule=Host(`buzzy.exemple.com`)"
@@ -47,32 +74,34 @@ services:
 
   # ─────────────────────────────────────────────────────────────────
   # OPTIONNEL — Recherche web MCP 100% gratuite et auto-hébergée.
-  # Décommentez ce bloc, lancez `docker compose up -d`, puis ajoutez
-  # http://searxng-mcp:3000/mcp comme serveur MCP personnalisé dans
-  # les Paramètres > Recherche Web (MCP) de Buzzy, et activez-le.
+  # En local, ces services sont déjà fournis par docker-compose.override.yml.
+  # Pour les activer sur COOLIFY, décommentez ce bloc (les fichiers
+  # searxng/settings.yml et searxng-mcp/Dockerfile sont dans le dépôt),
+  # puis, dans Buzzy → Paramètres → Recherche Web (MCP), activez le serveur
+  # http://searxng-mcp:8000/mcp (pré-enregistré via SEARXNG_MCP_URL).
   # ─────────────────────────────────────────────────────────────────
   # searxng:
   #   image: searxng/searxng:latest
   #   restart: unless-stopped
-  #   environment:
-  #     SEARXNG_BASE_URL: http://searxng:8080/
-  #     # Activez le format JSON dans searxng/settings.yml (formats: [html, json])
   #   volumes:
-  #     - buzzy_searxng_config:/etc/searxng
+  #     - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+  #   expose:
+  #     - '8080'
   #
   # searxng-mcp:
-  #   # Wrapper MCP HTTP autour de SearXNG (ex: image communautaire mcp-searxng).
-  #   # Adaptez l'image et le port selon le wrapper choisi.
-  #   image: isokoliuk/mcp-searxng:latest
+  #   build:
+  #     context: .
+  #     dockerfile: searxng-mcp/Dockerfile
   #   restart: unless-stopped
   #   depends_on:
   #     - searxng
   #   environment:
   #     SEARXNG_URL: http://searxng:8080
-  #     MCP_HTTP_PORT: 3000
-  #   # Le port n'a pas besoin d'être exposé à l'hôte : Buzzy y accède via
-  #   # le réseau interne Docker (http://searxng-mcp:3000/mcp).
+  #     MCP_PORT: '8000'
+  #   expose:
+  #     - '8000'
+  #
+  # (ajoutez alors sur le service `app` :  environment: { SEARXNG_MCP_URL: http://searxng-mcp:8000/mcp })
 
 volumes:
   buzzy_postgres_data:
-  # buzzy_searxng_config:

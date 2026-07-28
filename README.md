@@ -71,9 +71,27 @@ Au premier démarrage :
 
 Connectez-vous avec ces identifiants, puis configurez votre fournisseur IA dans **Paramètres → Modèle IA**.
 
-### Déploiement Coolify / Traefik
+### Déploiement Coolify
 
-Le `docker-compose.yml` contient un bloc de **labels Traefik commentés** (service `app`). Décommentez-les et adaptez le domaine (`Host(...)`) au moment du déploiement — rien n'est codé en dur.
+Buzzy est prêt pour **Coolify** via son `docker-compose.yml` (Coolify n'utilise que ce fichier, pas `docker-compose.override.yml`).
+
+1. **Créez une ressource** dans Coolify : *New Resource → Docker Compose* (basée sur ce dépôt Git), fichier `docker-compose.yml`.
+2. **Domaine** : le service `app` déclare la variable magique `SERVICE_FQDN_APP_3000`. Coolify génère automatiquement un domaine (ou renseignez le vôtre) et configure le reverse-proxy vers le port `3000` — aucun label à écrire, aucun port codé en dur.
+3. **Variables d'environnement** (onglet *Environment Variables* de Coolify) — définissez au minimum, avec le bouton *Generate* pour les secrets :
+
+   | Variable | Valeur |
+   |---|---|
+   | `JWT_SECRET` | secret aléatoire long |
+   | `ENCRYPTION_KEY` | secret aléatoire (≥ 32 caractères) |
+   | `POSTGRES_PASSWORD` | mot de passe Postgres |
+   | `DATABASE_URL` | `postgresql://buzzy:<POSTGRES_PASSWORD>@db:5432/buzzy` |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | identifiants du compte admin |
+
+4. **Déployez.** Le service `app` a un *healthcheck* (`/api/health`) : Coolify attend qu'il soit sain. Les migrations Prisma et la création du compte admin s'exécutent automatiquement au démarrage. Le volume `buzzy_postgres_data` persiste la base.
+
+> **Recherche web SearXNG sur Coolify** : décommentez le bloc `searxng` / `searxng-mcp` du `docker-compose.yml` et ajoutez `SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp` aux variables du service `app` (voir la section « Recherche web MCP » plus bas).
+>
+> **Autre reverse-proxy que Coolify ?** Le `docker-compose.yml` fournit aussi des **labels Traefik commentés** (service `app`) : décommentez-les et adaptez le domaine.
 
 ---
 
