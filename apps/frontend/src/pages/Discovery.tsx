@@ -31,6 +31,42 @@ const SCOPE_ICON: Record<EventScope, string> = {
   LOCAL: '📍',
 };
 
+// Tri chronologique des événements (eventDate, sinon eventPeriod ; sans date = à la fin).
+const MONTH_INDEX: Record<string, number> = {
+  janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
+  juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
+  printemps: 2, été: 5, ete: 5, automne: 8, hiver: 11,
+};
+
+function periodToTime(period: string | null): number | null {
+  if (!period) return null;
+  const p = period.toLowerCase();
+  const yearMatch = p.match(/\b(20\d{2})\b/);
+  if (!yearMatch) return null;
+  const year = parseInt(yearMatch[1], 10);
+  let month = 0;
+  for (const [name, idx] of Object.entries(MONTH_INDEX)) {
+    if (p.includes(name)) {
+      month = idx;
+      break;
+    }
+  }
+  return new Date(year, month, 1).getTime();
+}
+
+function eventTime(e: EventItem): number {
+  if (e.eventDate) {
+    const t = new Date(e.eventDate).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const pt = periodToTime(e.eventPeriod);
+  return pt ?? Number.POSITIVE_INFINITY;
+}
+
+function sortEventsByDate(list: EventItem[]): EventItem[] {
+  return [...list].sort((a, b) => eventTime(a) - eventTime(b));
+}
+
 export function DiscoveryPage() {
   const { toast } = useToast();
   const { selectedIds, toggle } = useSelection();
@@ -162,6 +198,9 @@ export function DiscoveryPage() {
 
   const isFirstGen = generate.isPending && generate.variables?.mode === 'new';
   const isMoreGen = generate.isPending && generate.variables?.mode === 'more';
+
+  // Affichage trié par date (chronologique).
+  const sortedEvents = useMemo(() => sortEventsByDate(events), [events]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -376,7 +415,7 @@ export function DiscoveryPage() {
               lorsqu'on vide la liste (ex : nouveau « Planifier & générer »). */}
           <motion.div layout className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <AnimatePresence mode="popLayout">
-              {events.map((ev) => (
+              {sortedEvents.map((ev) => (
                 <EventCard key={ev.id} event={ev} selected={selectedIds.includes(ev.id)} onToggleSelect={toggle} />
               ))}
             </AnimatePresence>
@@ -397,7 +436,7 @@ export function DiscoveryPage() {
 
           {events.length === 0 && !plan.isPending && (
             <HistoryOrEmpty
-              history={historyQuery.data?.events ?? []}
+              history={sortEventsByDate(historyQuery.data?.events ?? [])}
               loading={historyQuery.isLoading}
               onToggle={toggle}
               selectedIds={selectedIds}
