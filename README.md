@@ -215,11 +215,22 @@ Dès qu'au moins un serveur est actif, la génération d'événements transmet l
 >
 > Pour rester simple et sûr en environnement conteneurisé, Buzzy ne se connecte qu'à des serveurs MCP exposés en **HTTP/SSE** (distants ou conteneurs voisins sur le même réseau Docker). Aucun serveur MCP local n'est lancé en sous-processus (pas de stdio).
 
-### Serveurs MCP pré-intégrés
+### Serveurs MCP livrés et déployés avec Buzzy (100 % gratuits, sans clé)
+
+Trois serveurs auto-hébergés sont déployés par la stack et **pré-enregistrés automatiquement** (désactivés) ; activez-les d'un clic dans **Paramètres → Recherche Web (MCP)**. Utilisés ensemble, ils forment la chaîne *chercher → ouvrir → dater* qui élimine l'essentiel des inventions :
+
+| Serveur | Rôle | Pourquoi c'est utile |
+|---|---|---|
+| **SearXNG** ([`searxng-mcp/`](searxng-mcp/Dockerfile)) | Recherche web méta-moteur | Trouve les événements réels et fournit de vraies URLs |
+| **Fetch** ([`mcp-fetch/`](mcp-fetch/Dockerfile)) — *serveur officiel MCP* | Ouvre une page et la convertit en markdown | **Le plus efficace contre les inventions** : le modèle *lit* la page pour confirmer que l'événement et sa date existent, au lieu de les supposer |
+| **Time** ([`mcp-time/`](mcp-time/Dockerfile)) — *serveur officiel MCP* | Date et heure réelles | Sans lui, le modèle raisonne depuis sa date d'entraînement et se trompe d'année ou d'édition |
+
+Fetch et Time proviennent des [serveurs de référence officiels du projet MCP](https://github.com/modelcontextprotocol/servers) ; ils sont exposés en HTTP via *supergateway* (le conteneur applicatif ne lance aucun sous-processus).
+
+### Serveurs MCP externes pré-configurés (préréglages)
 
 | Serveur MCP | Coût | Clé API requise | Point fort |
 |---|---|---|---|
-| **SearXNG** (auto-hébergé) | 100% gratuit | Non | Aucune dépendance externe, confidentialité totale, à héberger soi-même (bloc docker-compose fourni) |
 | **Brave Search MCP** | Gratuit avec limite, puis payant | Oui | Simple, bon pour la recherche web/actualités générale |
 | **Tavily MCP** | Gratuit jusqu'à 1000 crédits/mois, puis payant | Oui | Résultats structurés optimisés pour les IA, bon rapport qualité/simplicité |
 | **Bright Data MCP** | Gratuit jusqu'à 5000 requêtes/mois, puis payant | Oui | Le plus robuste (contourne les blocages), utile pour des événements locaux peu indexés |

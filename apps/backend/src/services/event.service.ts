@@ -25,7 +25,9 @@ import {
 } from '../prompts';
 import type { EventScope, Event as PrismaEvent, Prisma } from '@prisma/client';
 
-const MAX_TOOL_ITERATIONS = 5;
+// Plusieurs serveurs MCP (recherche + lecture de page + date) impliquent
+// davantage d'allers-retours avant la réponse finale.
+const MAX_TOOL_ITERATIONS = 10;
 
 export interface GeneratedEventInput {
   scopes: EventScope[];

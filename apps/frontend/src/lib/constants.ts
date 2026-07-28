@@ -72,10 +72,24 @@ export interface McpPresetDef {
 export const MCP_PRESETS: McpPresetDef[] = [
   {
     preset: 'searxng',
-    label: 'SearXNG (auto-hébergé)',
+    label: 'SearXNG — recherche web (auto-hébergé)',
     url: 'http://searxng-mcp:8000/mcp',
     needsAuth: false,
-    note: '100% gratuit, aucune clé. Déployé via docker-compose.override.yml.',
+    note: '100% gratuit, aucune clé. Déployé avec Buzzy. Trouve les événements sur le web.',
+  },
+  {
+    preset: 'custom',
+    label: 'Fetch — lecture de pages (officiel MCP)',
+    url: 'http://mcp-fetch:8000/mcp',
+    needsAuth: false,
+    note: '100% gratuit, aucune clé. Ouvre les pages trouvées pour VÉRIFIER qu\'un événement existe. Le plus efficace contre les inventions.',
+  },
+  {
+    preset: 'custom',
+    label: 'Time — date du jour (officiel MCP)',
+    url: 'http://mcp-time:8000/mcp',
+    needsAuth: false,
+    note: '100% gratuit, aucune clé. Donne la date réelle : évite les erreurs d\'année et d\'édition.',
   },
   {
     preset: 'brave',

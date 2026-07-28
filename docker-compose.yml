@@ -108,5 +108,33 @@ services:
     expose:
       - '8000'
 
+  # ─────────────────────────────────────────────────────────────────
+  # Serveurs MCP officiels (modelcontextprotocol/servers) — gratuits,
+  # sans clé API. Complètent la recherche pour fiabiliser les résultats :
+  #   • mcp-fetch : ouvre réellement une page trouvée et en lit le contenu
+  #                 → vérifie qu'un événement et son URL existent vraiment
+  #   • mcp-time  : donne la date réelle du jour (évite les erreurs d'année)
+  # ─────────────────────────────────────────────────────────────────
+  mcp-fetch:
+    build:
+      context: .
+      dockerfile: mcp-fetch/Dockerfile
+    restart: unless-stopped
+    environment:
+      MCP_PORT: '8000'
+    expose:
+      - '8000'
+
+  mcp-time:
+    build:
+      context: .
+      dockerfile: mcp-time/Dockerfile
+    restart: unless-stopped
+    environment:
+      MCP_PORT: '8000'
+      LOCAL_TIMEZONE: ${LOCAL_TIMEZONE:-Europe/Paris}
+    expose:
+      - '8000'
+
 volumes:
   buzzy_postgres_data:

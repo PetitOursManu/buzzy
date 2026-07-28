@@ -30,25 +30,42 @@ export async function ensureAdminUser(): Promise<void> {
 }
 
 /**
- * Pré-enregistre un serveur MCP SearXNG si l'URL est fournie via la variable
- * d'environnement SEARXNG_MCP_URL (cas du déploiement Docker avec le service
- * searxng-mcp voisin). Créé désactivé : l'utilisateur l'active d'un clic.
- * Idempotent : ne recrée pas s'il existe déjà (même URL).
+ * Pré-enregistre les serveurs MCP auto-hébergés livrés avec Buzzy, quand leur
+ * URL est fournie par l'environnement (services voisins du docker-compose).
+ * Créés DÉSACTIVÉS : l'utilisateur les active d'un clic dans les Paramètres.
+ * Idempotent : ne recrée pas un serveur déjà enregistré (même URL).
  */
+const SEEDED_MCP_SERVERS: { env: string; name: string; preset: string; fallback?: string }[] = [
+  {
+    env: 'SEARXNG_MCP_URL',
+    name: 'SearXNG — recherche web (auto-hébergé)',
+    preset: 'searxng',
+  },
+  {
+    env: 'MCP_FETCH_URL',
+    name: 'Fetch — lecture de pages web (officiel)',
+    preset: 'custom',
+    fallback: 'http://mcp-fetch:8000/mcp',
+  },
+  {
+    env: 'MCP_TIME_URL',
+    name: 'Time — date du jour (officiel)',
+    preset: 'custom',
+    fallback: 'http://mcp-time:8000/mcp',
+  },
+];
+
 export async function ensureSeededMcpServers(): Promise<void> {
-  const url = process.env.SEARXNG_MCP_URL?.trim();
-  if (!url) return;
-  const existing = await prisma.mcpServer.findFirst({ where: { url } });
-  if (existing) return;
-  await prisma.mcpServer.create({
-    data: {
-      name: 'SearXNG (auto-hébergé)',
-      url,
-      enabled: false,
-      preset: 'searxng',
-    },
-  });
-  console.log(`[seed] Serveur MCP SearXNG pré-enregistré (désactivé) : ${url}`);
+  for (const server of SEEDED_MCP_SERVERS) {
+    const url = (process.env[server.env]?.trim() || server.fallback || '').trim();
+    if (!url) continue;
+    const existing = await prisma.mcpServer.findFirst({ where: { url } });
+    if (existing) continue;
+    await prisma.mcpServer.create({
+      data: { name: server.name, url, enabled: false, preset: server.preset },
+    });
+    console.log(`[seed] Serveur MCP pré-enregistré (désactivé) : ${server.name} → ${url}`);
+  }
 }
 
 // Permet d'exécuter le seed en CLI : `npm run seed`
