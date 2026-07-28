@@ -331,6 +331,16 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     created.push(event);
   }
 
+  // Traçabilité : indispensable pour comprendre une génération vide.
+  console.log(
+    `[events] modèle=${config.model} web=${toolsUsed ? 'oui' : 'non'} ` +
+      `proposés=${rawEvents.length} retenus=${created.length} ` +
+      `écartés(incertains)=${discardedUncertain} écartés(sans source)=${discardedUnsourced}`,
+  );
+  if (rawEvents.length === 0) {
+    console.log(`[events] réponse brute du modèle (500 car.) : ${finalText.slice(0, 500)}`);
+  }
+
   const notices: string[] = [];
   if (webSearchRequested && !webSearchAvailable) {
     notices.push(
@@ -348,9 +358,16 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     if (discardedUnsourced > 0) details.push(`${discardedUnsourced} sans source vérifiable (mode strict)`);
     notices.push(`${discarded} événement(s) écarté(s) : ${details.join(', ')}.`);
   }
+  if (input.strictSources && !toolsUsed) {
+    notices.push(
+      'Le mode strict est actif SANS recherche web : sans possibilité de vérifier les liens, presque tous les événements sont écartés. Activez un serveur MCP de recherche, ou désactivez le mode strict.',
+    );
+  }
   if (created.length === 0) {
     notices.push(
-      "Aucun événement certain n'a été trouvé pour ces critères. Élargissez la période ou les thèmes, ou activez la recherche web pour de meilleurs résultats.",
+      rawEvents.length === 0
+        ? "Le modèle n'a proposé aucun événement pour ces critères. Essayez d'élargir la période, la portée ou les thèmes."
+        : 'Tous les événements proposés ont été écartés par les filtres de fiabilité (voir ci-dessus).',
     );
   }
   if (!toolsUsed && created.length > 0) {

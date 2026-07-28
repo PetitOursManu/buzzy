@@ -77,10 +77,11 @@ export function describeDateTarget(dt: DateTarget): string {
 
 export function eventGenerationSystemPrompt(webSearchEnabled: boolean): string {
   return [
-    "Tu es un documentaliste spécialisé dans la veille d'événements. Ton exigence absolue est l'EXACTITUDE FACTUELLE, jamais la quantité.",
+    "Tu es un documentaliste spécialisé dans la veille d'événements. Ton exigence est l'EXACTITUDE FACTUELLE.",
     "Ta mission : RECENSER des événements qui existent RÉELLEMENT (journées mondiales officielles, salons, festivals, conférences, temps forts récurrents…) correspondant aux critères fournis.",
-    "INTERDICTION ABSOLUE d'inventer : ne crée jamais un événement, un nom, une édition, une date ou un lieu qui n'existe pas. Tu ne dois JAMAIS extrapoler une « édition 2026 » d'un événement dont tu n'as pas connaissance, ni inventer un événement local plausible pour satisfaire une demande.",
-    "Il vaut infiniment mieux renvoyer PEU d'événements (voire aucun) que d'en inventer un seul. Un événement inventé est une faute grave ; une liste courte est un résultat parfaitement acceptable.",
+    "CE QUE TU SAIS ET DOIS UTILISER : les journées mondiales et internationales officielles (ONU, UNESCO, OMS…), les fêtes et temps forts annuels récurrents, ainsi que les grands salons et festivals établis sont des FAITS ÉTABLIS et vérifiables, à date fixe ou récurrente. Tu DOIS les proposer quand ils correspondent aux critères : ce ne sont pas des inventions, et les omettre serait une erreur.",
+    "CE QUE TU NE DOIS JAMAIS FAIRE : inventer un événement, un nom, un lieu ou une date ; inventer un événement local « plausible » pour satisfaire une demande ; affirmer l'existence d'une édition précise (dates, programme, lieu) d'un événement dont tu n'as pas connaissance.",
+    "En cas de doute sur un événement précis : ne le mets pas. Mais ne renvoie pas une liste vide par excès de prudence si des événements récurrents établis correspondent aux critères.",
     webSearchEnabled
       ? "Tu disposes d'outils : recherche web, lecture de page (fetch) et date du jour (time). MÉTHODE OBLIGATOIRE : (1) commence par connaître la date réelle si un outil le permet ; (2) recherche les événements ; (3) quand c'est possible, OUVRE la page candidate avec l'outil de lecture pour confirmer que l'événement et sa date y figurent vraiment. Ne retiens un événement que si une source consultée le confirme. RÈGLE ABSOLUE sur les sources : n'indique QUE des URLs réellement vues dans les résultats ou effectivement ouvertes, copiées à l'identique. N'invente, ne devine et ne complète JAMAIS une URL."
       : "Tu ne disposes PAS de recherche web : tu ne peux donc pas vérifier les URLs. RÈGLE ABSOLUE : ne donne que des URLs d'accueil de sites institutionnels dont tu es certain qu'ils existent (ex: https://www.unesco.org). N'invente JAMAIS de chemin profond (/articles/..., /events/2026/...) : ces liens n'existent presque jamais. En cas de doute, laisse le tableau sources VIDE.",
@@ -94,13 +95,22 @@ function describeScopesAndRegions(params: EventGenParams): string {
     scopeLabels.length === 1
       ? `de portée ${scopeLabels[0]}`
       : `de portées ${scopeLabels.join(', ')}`;
-  const hasRegions = params.regions.length > 0;
-  const regionText = hasRegions
-    ? params.regions.length === 1
-      ? ` concernant la localisation « ${params.regions[0]} »`
-      : ` répartis sur les localisations suivantes : ${params.regions.map((r) => `« ${r} »`).join(', ')}`
-    : '';
-  return `${scopeText}${regionText}`;
+
+  if (params.regions.length === 0) return scopeText;
+
+  const zones = params.regions.map((r) => `« ${r} »`).join(', ');
+  // La localisation ne s'applique qu'aux portées régionale/locale : un
+  // événement mondial ne « concerne » pas une ville en particulier.
+  const hasWideScope = params.scopes.some((s) => s === 'GLOBAL' || s === 'NATIONAL');
+  const hasLocalScope = params.scopes.some((s) => s === 'REGIONAL' || s === 'LOCAL');
+
+  if (hasWideScope && hasLocalScope) {
+    return `${scopeText}. Pour les portées régionale et locale, cible ${zones} ; pour les portées mondiale et nationale, propose les événements correspondants sans restriction géographique (n'exige pas de lien avec ${zones})`;
+  }
+  if (hasLocalScope) {
+    return `${scopeText}, situés à/en ${zones}`;
+  }
+  return scopeText;
 }
 
 export function eventGenerationUserPrompt(params: EventGenParams): string {
@@ -162,7 +172,7 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
 
   return [
     `Recense JUSQU'À ${params.count} événements ${describeScopesAndRegions(params)}, concernant ${describeDateTarget(params.dateTarget)}.`,
-    `${params.count} est un MAXIMUM, pas un objectif : n'inclus QUE les événements dont tu es certain. S'il n'en existe que 2 dont tu es sûr, n'en renvoie que 2. Si tu n'es sûr d'aucun, renvoie une liste vide.`,
+    `${params.count} est un MAXIMUM, pas un objectif : n'inclus que les événements dont tu es certain — mais inclus TOUS ceux qui le sont (journées mondiales/internationales officielles, temps forts récurrents établis…). Ne renvoie une liste vide que si vraiment aucun événement certain ne correspond.`,
     themesPart,
     ...(priorityPart ? [priorityPart] : []),
     excludePart,
@@ -172,8 +182,8 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
     '',
     'Contraintes :',
     "- N'inclus QUE des événements réels et établis. Aucune invention, aucune extrapolation, aucun événement « probable ».",
-    '- Renseigne le champ "certainty" honnêtement : "certain" (événement officiel/récurrent que tu connais avec certitude, ou confirmé par une recherche) ou "incertain". Tout événement "incertain" sera automatiquement écarté — préfère l\'omettre.',
-    "- Si tu hésites sur l'existence, la date ou l'édition d'un événement : ne le mets pas.",
+    '- Champ "certainty" : mets "certain" pour toute journée mondiale/internationale officielle, tout temps fort récurrent établi, ou tout événement confirmé par une recherche — c\'est le cas le plus fréquent. Réserve "incertain" aux événements dont tu doutes réellement de l\'existence (ils seront écartés).',
+    "- Si tu hésites sur l'existence d'un événement : ne le mets pas. Si tu es sûr de l'événement mais pas de sa date exacte, indique la période plutôt qu'une fausse date précise.",
     ...(priorityPart
       ? ['- Consacre la majorité des événements aux thèmes prioritaires indiqués.']
       : []),
