@@ -91,10 +91,14 @@ services:
   # laissez SEARXNG_MCP_URL vide.
   # ─────────────────────────────────────────────────────────────────
   searxng:
-    image: searxng/searxng:latest
+    # Image construite avec la configuration intégrée (pas de bind mount :
+    # celui-ci échoue sur Coolify, où le dépôt n'est pas monté à l'exécution).
+    build:
+      context: .
+      dockerfile: searxng/Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-buzzy-searxng-change-me-please-0123456789}
     expose:
       - '8080'
 
