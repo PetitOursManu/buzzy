@@ -246,6 +246,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     webSearchEnabled: webSearchAvailable,
     plan: input.plan,
     preferredNetworks,
+    prioritySources: profile?.prioritySources ?? undefined,
   };
 
   const messages: ChatMessage[] = [
@@ -333,6 +334,7 @@ export interface PlanInput {
 export async function planEvents(input: PlanInput): Promise<{ plan: string }> {
   const config = await getActiveAiConfig();
   const webSearchAvailable = (await prisma.mcpServer.count({ where: { enabled: true } })) > 0;
+  const profile = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
 
   const params: EventGenParams = {
     scopes: input.scopes,
@@ -344,6 +346,7 @@ export async function planEvents(input: PlanInput): Promise<{ plan: string }> {
     count: input.count,
     webSearchEnabled: webSearchAvailable,
     preferredNetworks: [],
+    prioritySources: profile?.prioritySources ?? undefined,
   };
 
   const messages: ChatMessage[] = [

@@ -43,6 +43,7 @@ export interface UserProfileInfo {
   tone: Tone;
   targetAudience: string | null;
   restrictions: string | null;
+  prioritySources: string | null;
   preferredNetworks: Network[];
   updatedAt: string;
 }

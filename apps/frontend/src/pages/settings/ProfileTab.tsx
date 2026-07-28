@@ -16,6 +16,7 @@ export function ProfileTab() {
   const [tone, setTone] = useState<Tone>('professionnel');
   const [targetAudience, setTargetAudience] = useState('');
   const [restrictions, setRestrictions] = useState('');
+  const [prioritySources, setPrioritySources] = useState('');
   const [preferredNetworks, setPreferredNetworks] = useState<Network[]>([]);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function ProfileTab() {
       setTone(p.tone);
       setTargetAudience(p.targetAudience ?? '');
       setRestrictions(p.restrictions ?? '');
+      setPrioritySources(p.prioritySources ?? '');
       setPreferredNetworks(p.preferredNetworks ?? []);
     }
   }, [profileQuery.data]);
@@ -39,6 +41,7 @@ export function ProfileTab() {
         tone,
         targetAudience: targetAudience || null,
         restrictions: restrictions || null,
+        prioritySources: prioritySources || null,
         preferredNetworks,
       }),
     onSuccess: () => {
@@ -91,6 +94,18 @@ export function ProfileTab() {
           value={restrictions}
           onChange={(e) => setRestrictions(e.target.value)}
           placeholder="ex : ne pas parler de politique, éviter le tutoiement…"
+        />
+      </Field>
+
+      <Field
+        label="Sources à privilégier"
+        hint="Sites, domaines ou organismes que l'IA doit privilégier pour trouver et sourcer les événements, EN PLUS de ses sources habituelles. Un par ligne ou séparés par des virgules."
+      >
+        <textarea
+          className="glass-input min-h-[90px] resize-y"
+          value={prioritySources}
+          onChange={(e) => setPrioritySources(e.target.value)}
+          placeholder={'ex :\nunesco.org\njournee-mondiale.com\nAgenda de ma région / ville\nSites d\'associations locales'}
         />
       </Field>
 

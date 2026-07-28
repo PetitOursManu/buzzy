@@ -31,6 +31,7 @@ model UserProfile {
   targetAudience    String?
   restrictions      String?
   preferredNetworks String[] // réseaux pour lesquels générer une description par événement
+  prioritySources   String? // sources à privilégier pour trouver les événements (en plus des sources IA)
   updatedAt         DateTime @updatedAt
 }
 

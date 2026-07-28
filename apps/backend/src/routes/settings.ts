@@ -164,6 +164,7 @@ router.put('/profile', validate(profileSchema), async (req, res) => {
     tone: string;
     targetAudience?: string | null;
     restrictions?: string | null;
+    prioritySources?: string | null;
     preferredNetworks?: string[];
   };
   const existing = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
@@ -172,6 +173,7 @@ router.put('/profile', validate(profileSchema), async (req, res) => {
     tone: body.tone,
     targetAudience: body.targetAudience ?? null,
     restrictions: body.restrictions ?? null,
+    prioritySources: body.prioritySources ?? null,
     preferredNetworks: body.preferredNetworks ?? [],
   };
   const saved = existing

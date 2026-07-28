@@ -34,6 +34,7 @@ export const profileSchema = z.object({
   tone: z.enum(['professionnel', 'chaleureux', 'humoristique', 'institutionnel']),
   targetAudience: z.string().max(1000).optional().nullable(),
   restrictions: z.string().max(4000).optional().nullable(),
+  prioritySources: z.string().max(4000).optional().nullable(),
   preferredNetworks: z
     .array(z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']))
     .max(5)

@@ -93,6 +93,7 @@ export const settingsApi = {
     tone: string;
     targetAudience?: string | null;
     restrictions?: string | null;
+    prioritySources?: string | null;
     preferredNetworks?: string[];
   }) => request<UserProfileInfo>('/settings/profile', { method: 'PUT', body: JSON.stringify(data) }),
 

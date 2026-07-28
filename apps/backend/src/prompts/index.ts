@@ -30,6 +30,7 @@ export interface EventGenParams {
   webSearchEnabled: boolean;
   plan?: string; // plan validé par l'utilisateur (mode planification)
   preferredNetworks: string[]; // descriptions par réseau à générer pour chaque événement
+  prioritySources?: string; // sources à privilégier pour trouver/sourcer les événements
 }
 
 /** Consigne de longueur/ton pour une description d'événement adaptée à un réseau. */
@@ -121,6 +122,9 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
   const planPart = params.plan
     ? `\n\nPlan validé à suivre pour cette génération :\n${params.plan}`
     : '';
+  const prioritySourcesPart = params.prioritySources?.trim()
+    ? `\n\nSources à privilégier EN PRIORITÉ pour trouver et sourcer les événements (en plus de tes sources habituelles) :\n${params.prioritySources.trim()}`
+    : '';
 
   const hasNetworks = params.preferredNetworks.length > 0;
   const networksPart = hasNetworks
@@ -159,12 +163,16 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
     ...(priorityPart ? [priorityPart] : []),
     excludePart,
     planPart,
+    prioritySourcesPart,
     networksPart,
     '',
     'Contraintes :',
     '- Chaque événement doit être plausible et vérifiable.',
     ...(priorityPart
       ? ['- Consacre la majorité des événements aux thèmes prioritaires indiqués.']
+      : []),
+    ...(prioritySourcesPart
+      ? ['- Privilégie les sources indiquées ci-dessus quand elles sont pertinentes, sans t\'y limiter.']
       : []),
     ...(multiRegionConstraint ? [multiRegionConstraint] : []),
     ...(hasNetworks
@@ -195,10 +203,14 @@ export function eventPlanUserPrompt(params: EventGenParams): string {
     params.priorityThemes.length > 0
       ? `Thèmes prioritaires : ${params.priorityThemes.join(', ')}.`
       : '';
+  const sourcesPart = params.prioritySources?.trim()
+    ? `Sources à privilégier : ${params.prioritySources.trim()}.`
+    : '';
   return [
     `Établis un plan pour proposer ${params.count} événements ${describeScopesAndRegions(params)}, concernant ${describeDateTarget(params.dateTarget)}.`,
     themesPart,
     priorityPart,
+    sourcesPart,
     params.webSearchEnabled
       ? 'Tu disposes d\'outils de recherche web : indique quelles recherches tu comptes effectuer.'
       : 'Tu ne disposes pas de recherche web : appuie-toi sur tes connaissances.',
