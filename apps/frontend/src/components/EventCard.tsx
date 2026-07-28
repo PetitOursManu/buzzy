@@ -18,6 +18,85 @@ function formatEventWhen(ev: EventItem): string {
   return ev.eventPeriod ?? 'Date à préciser';
 }
 
+/** Recherche web de secours quand aucune source fiable n'est disponible. */
+function searchUrl(event: EventItem): string {
+  const when = event.eventDate
+    ? new Date(event.eventDate).getFullYear()
+    : (event.eventPeriod?.match(/20\d{2}/)?.[0] ?? '');
+  const q = [event.title, event.region ?? '', when].filter(Boolean).join(' ');
+  return `https://duckduckgo.com/?q=${encodeURIComponent(q)}`;
+}
+
+const SOURCE_HINT: Record<string, { icon: string; label: string; className: string }> = {
+  ok: { icon: '✅', label: 'Lien vérifié', className: 'text-[color:var(--grape)]' },
+  redirected: {
+    icon: '↪️',
+    label: "Redirige vers l'accueil du site — page précise introuvable",
+    className: 'text-amber-600 dark:text-amber-400',
+  },
+  unchecked: {
+    icon: '❔',
+    label: 'Lien non vérifiable automatiquement (site protégé)',
+    className: 'text-[color:var(--text-secondary)]',
+  },
+};
+
+/** Liste des sources, avec l'état réel de chaque lien. */
+function SourceList({ event }: { event: EventItem }) {
+  const sources = event.sources ?? [];
+
+  if (sources.length === 0) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-muted">Sources :</span>
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Aucune source fiable fournie (les liens inexistants sont automatiquement écartés).
+        </p>
+        <a
+          href={searchUrl(event)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-[color:var(--grape)] hover:underline"
+        >
+          🔎 Rechercher des sources sur le web
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted">Sources :</span>
+      <ul className="flex flex-col gap-0.5">
+        {sources.slice(0, 4).map((s, i) => {
+          const hint = SOURCE_HINT[s.status ?? 'unchecked'] ?? SOURCE_HINT.unchecked;
+          return (
+            <li key={i}>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${hint.label} — ${s.url}`}
+                className={`text-xs hover:underline break-all ${hint.className}`}
+              >
+                {hint.icon} {s.title || s.url}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+      <a
+        href={searchUrl(event)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-muted hover:underline"
+      >
+        🔎 Chercher d'autres sources
+      </a>
+    </div>
+  );
+}
+
 /** Descriptions adaptées par réseau (onglets + copie). */
 function NetworkDescriptions({ descriptions }: { descriptions: Partial<Record<Network, string>> }) {
   const { toast } = useToast();
@@ -125,25 +204,7 @@ export function EventCard({
         {formatEventWhen(event)}
       </div>
 
-      {event.sources.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted">Sources :</span>
-          <ul className="flex flex-col gap-0.5">
-            {event.sources.slice(0, 4).map((s, i) => (
-              <li key={i}>
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-[color:var(--grape)] hover:underline break-all"
-                >
-                  🔗 {s.title || s.url}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <SourceList event={event} />
 
       {hasNetworkDescriptions && <NetworkDescriptions descriptions={event.networkDescriptions!} />}
 

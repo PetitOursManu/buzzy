@@ -175,9 +175,18 @@ Toutes les routes (hors `login`/`logout`/`health`) exigent le cookie JWT.
 
 ## 🔎 Fiabilité des sources
 
-> **Important.** Sans recherche web MCP activée, Buzzy dépend entièrement des connaissances du modèle IA configuré. Le modèle peut se tromper de dates ou proposer des liens approximatifs : les événements sont alors marqués **« Sources à vérifier »** et **doivent être vérifiés manuellement**.
+Buzzy **teste réellement chaque lien** produit par l'IA avant de l'enregistrer (requête HTTP, suivi des redirections) :
+
+- **lien mort (404/410, domaine inexistant, timeout)** → **supprimé** automatiquement ;
+- **redirection vers l'accueil** (la page précise n'existe pas) → conservé mais signalé ↪️ ;
+- **site protégé anti-bot** (403/429) → conservé, non certifié ❔ ;
+- **lien qui répond** → ✅ *Lien vérifié*.
+
+Quand aucune source fiable ne subsiste, la carte l'indique clairement et propose un lien **« Rechercher des sources sur le web »**.
+
+> **Important.** Sans recherche web MCP activée, le modèle ne peut pas vérifier ses URLs : il lui est demandé de ne fournir que des adresses de sites institutionnels certaines (jamais de chemin profond deviné), et de laisser les sources vides en cas de doute. Les événements restent marqués **« Sources à vérifier »**.
 >
-> Avec la recherche web MCP activée, les sources proviennent de **résultats de recherche réels** et les événements sont marqués **« Sources vérifiées »** — mais leur qualité dépend du serveur MCP choisi.
+> Avec la recherche web MCP activée, les URLs proviennent de **résultats de recherche réels** ; un événement n'est marqué **« Sources vérifiées »** que si la recherche web a servi **et** qu'au moins un lien répond effectivement.
 
 ---
 
@@ -216,19 +225,13 @@ Le `docker-compose.yml` inclut deux services **désactivés par défaut** derri�
 - **`searxng`** — moteur de recherche (format JSON activé via [`searxng/settings.yml`](searxng/settings.yml)) ;
 - **`searxng-mcp`** — wrapper qui expose SearXNG en **MCP Streamable HTTP** (`/mcp`) via [`searxng-mcp/Dockerfile`](searxng-mcp/Dockerfile) (mcp-searxng + supergateway).
 
-**Activation — uniquement via 2 variables d'environnement**, sans jamais éditer le compose (valable en local ET sur Coolify) :
+Ces services sont **déployés automatiquement** avec la stack (`docker compose up -d --build`), en local comme sur Coolify — aucune variable ni manipulation requise.
 
-```
-COMPOSE_PROFILES=searxng
-SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp
-```
+Au démarrage, l'app **pré-enregistre le serveur MCP** `http://searxng-mcp:8000/mcp` (désactivé). Il suffit d'aller dans **Paramètres → Recherche Web (MCP)** et de le cocher **Actif** — aucune clé API.
 
-- **En local** : décommentez ces deux lignes dans votre `.env`, puis `docker compose up -d --build`.
-- **Sur Coolify** : ajoutez-les dans l'onglet *Environment Variables* de la ressource, puis redéployez.
-
-Au démarrage, l'app lit `SEARXNG_MCP_URL` et **pré-enregistre automatiquement** le serveur MCP (désactivé). Il suffit alors d'aller dans **Paramètres → Recherche Web (MCP)** et de le cocher **Actif** — aucune clé API, aucune configuration manuelle.
-
-> Sans ces variables, les services SearXNG ne sont pas déployés (profil inactif) et Buzzy fonctionne normalement, sources marquées « à vérifier ».
+> **Pourquoi pas un profil Compose ?** Coolify injecte les variables d'environnement dans les conteneurs, mais ne les transmet pas à la commande `docker compose` : un `COMPOSE_PROFILES` défini dans son interface ne démarrerait donc jamais les services (erreur `ENOTFOUND searxng-mcp`). Les services sont donc déclarés sans profil ; la recherche web reste inactive côté application tant que le serveur MCP n'est pas activé dans les paramètres.
+>
+> Pour ne pas déployer SearXNG du tout : supprimez les services `searxng` / `searxng-mcp` du `docker-compose.yml` et laissez `SEARXNG_MCP_URL` vide.
 >
 > **Note d'architecture** : une application web ne peut pas provisionner d'infrastructure. Buzzy ne *démarre* pas de serveur MCP depuis un clic dans l'UI (cela exigerait l'accès au démon Docker de l'hôte, un risque de sécurité, et est interdit par conception). L'approche retenue — services derrière un profil Compose + pré-enregistrement automatique — offre l'expérience la plus proche de « ça marche en un clic » sans compromettre la sécurité.
 

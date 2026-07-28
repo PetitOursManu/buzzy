@@ -12,6 +12,7 @@ import {
   callMcpTool,
   type ConnectedMcpServer,
 } from './mcp.service';
+import { verifySources, type RawSource } from './source-check.service';
 import {
   eventGenerationSystemPrompt,
   eventGenerationUserPrompt,
@@ -22,7 +23,7 @@ import {
   type EventGenParams,
   type DateTarget,
 } from '../prompts';
-import type { EventScope, Event as PrismaEvent } from '@prisma/client';
+import type { EventScope, Event as PrismaEvent, Prisma } from '@prisma/client';
 
 const MAX_TOOL_ITERATIONS = 5;
 
@@ -79,13 +80,13 @@ function coerceScope(value: string | undefined, fallback: EventScope): EventScop
   return VALID_SCOPES.includes(up) ? up : fallback;
 }
 
-function cleanSources(sources: RawEvent['sources']): { list: { title: string; url: string }[]; hasValid: boolean } {
-  if (!Array.isArray(sources)) return { list: [], hasValid: false };
-  const list = sources
+/** Extrait et nettoie les sources brutes renvoyées par le modèle (sans vérification réseau). */
+function cleanSources(sources: RawEvent['sources']): RawSource[] {
+  if (!Array.isArray(sources)) return [];
+  return sources
     .map((s) => ({ title: (s?.title ?? '').toString().trim(), url: (s?.url ?? '').toString().trim() }))
     .filter((s) => /^https?:\/\//i.test(s.url))
     .map((s) => ({ title: s.title || s.url, url: s.url }));
-  return { list, hasValid: list.length > 0 };
 }
 
 function extractJson(text: string): unknown {
@@ -279,9 +280,11 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   const created: PrismaEvent[] = [];
   for (const raw of rawEvents) {
     if (!raw.title || !raw.description) continue;
-    const { list: sources, hasValid } = cleanSources(raw.sources);
-    // "verified" = true seulement si la recherche web a réellement servi ET des sources valides existent.
-    const verified = toolsUsed && hasValid;
+    // Vérification réseau réelle des liens : on écarte les 404 / liens morts
+    // et on qualifie chaque source (ok / redirigée / non vérifiable).
+    const { sources, hasLiveSource } = await verifySources(cleanSources(raw.sources));
+    // "verified" = la recherche web a servi ET au moins un lien répond vraiment.
+    const verified = toolsUsed && hasLiveSource;
     let eventDate: Date | null = null;
     if (raw.eventDate) {
       const d = new Date(raw.eventDate);
@@ -297,7 +300,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
         theme: (raw.theme ?? input.themes[0] ?? 'Autre').toString().trim(),
         eventDate,
         eventPeriod: raw.eventPeriod?.toString().trim() || null,
-        sources: sources,
+        sources: sources as unknown as Prisma.InputJsonValue,
         networkDescriptions: networkDescriptions ?? undefined,
         verified,
       },

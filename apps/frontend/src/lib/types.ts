@@ -4,9 +4,13 @@ export type Network = 'facebook' | 'instagram' | 'linkedin' | 'x' | 'tiktok';
 export type Tone = 'professionnel' | 'chaleureux' | 'humoristique' | 'institutionnel';
 export type McpPreset = 'brave' | 'tavily' | 'bright-data' | 'searxng' | 'custom';
 
+export type SourceStatus = 'ok' | 'redirected' | 'unreachable' | 'unchecked';
+
 export interface EventSource {
   title: string;
   url: string;
+  /** Absent sur les événements générés avant la vérification des liens. */
+  status?: SourceStatus;
 }
 
 export interface EventItem {

@@ -80,8 +80,8 @@ export function eventGenerationSystemPrompt(webSearchEnabled: boolean): string {
     "Tu es un assistant expert en veille d'événements et d'actualités pour la création de contenu sur les réseaux sociaux.",
     "Ta mission : proposer des événements réels, pertinents et variés (journées mondiales, salons, festivals, conférences, dates marquantes, temps forts saisonniers, etc.) correspondant précisément aux critères fournis.",
     webSearchEnabled
-      ? "Tu disposes d'outils de recherche web : utilise-les pour vérifier l'existence des événements et fournir des sources réelles et exploitables (liens cliquables valides)."
-      : "Tu ne disposes pas de recherche web. Fournis les meilleures sources que tu connais, en restant honnête : n'invente jamais de liens qui n'existent pas.",
+      ? "Tu disposes d'outils de recherche web : utilise-les pour vérifier l'existence des événements. RÈGLE ABSOLUE sur les sources : n'indique QUE des URLs que tu as réellement vues dans les résultats de recherche, copiées à l'identique. N'invente, ne devine et ne complète JAMAIS une URL."
+      : "Tu ne disposes PAS de recherche web : tu ne peux donc pas vérifier les URLs. RÈGLE ABSOLUE : ne donne que des URLs d'accueil de sites institutionnels dont tu es certain qu'ils existent (ex: https://www.unesco.org). N'invente JAMAIS de chemin profond (/articles/..., /events/2026/...) : ces liens n'existent presque jamais. En cas de doute, laisse le tableau sources VIDE.",
     'Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, respectant strictement le schéma demandé.',
   ].join(' ');
 }
@@ -179,7 +179,9 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
       ? ['- Fournis une description distincte par réseau demandé dans "networkDescriptions".']
       : []),
     "- Varie les thèmes et les types d'événements.",
-    "- Fournis des sources sous forme de liens réels (site officiel, page dédiée, article). Si tu n'as pas de source fiable, laisse le tableau sources vide plutôt que d'inventer.",
+    '- SOURCES : chaque URL doit exister réellement. Un lien inventé est PIRE que pas de lien — il sera automatiquement détecté et supprimé.',
+    "- Préfère une URL d'accueil ou de rubrique stable et certaine plutôt qu'un lien profond deviné.",
+    "- Si tu n'as aucune source dont tu es sûr, laisse le tableau sources VIDE.",
     '',
     'Schéma JSON attendu :',
     JSON.stringify({ events: [eventShape] }, null, 2),

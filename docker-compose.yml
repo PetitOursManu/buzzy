@@ -33,9 +33,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       PORT: 3000
       NODE_ENV: production
-      # Recherche web SearXNG : renseignez cette variable ET COMPOSE_PROFILES=searxng
-      # pour l'activer (voir le bloc searxng plus bas). Laissée vide, elle est ignorée.
-      SEARXNG_MCP_URL: ${SEARXNG_MCP_URL:-}
+      # Recherche web SearXNG (services searxng + searxng-mcp ci-dessous).
+      # Pré-enregistre le serveur MCP dans Buzzy au démarrage ; il reste à
+      # l'activer dans Paramètres → Recherche Web (MCP).
+      SEARXNG_MCP_URL: ${SEARXNG_MCP_URL:-http://searxng-mcp:8000/mcp}
     # Port interne exposé au réseau Docker / au proxy Coolify (pas à l'hôte).
     expose:
       - '3000'
@@ -77,19 +78,18 @@ services:
 
   # ─────────────────────────────────────────────────────────────────
   # Recherche web MCP 100% gratuite et auto-hébergée (SearXNG).
-  # DÉSACTIVÉE par défaut via le profil Docker Compose « searxng ».
   #
-  # Pour l'ACTIVER (sans éditer ce fichier), définissez DEUX variables
-  # d'environnement (dans l'UI Coolify, ou dans .env en local) :
-  #     COMPOSE_PROFILES=searxng
-  #     SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp
-  # Puis (re)déployez. Le serveur MCP est pré-enregistré (désactivé) dans
-  # Buzzy ; activez-le dans Paramètres → Recherche Web (MCP).
+  # Déployée par défaut (pas de profil Compose : Coolify ne transmet pas
+  # COMPOSE_PROFILES à la commande `docker compose`, les services ne
+  # démarreraient jamais). Elle reste INACTIVE côté application tant que
+  # le serveur MCP n'est pas activé dans Paramètres → Recherche Web (MCP).
+  #
+  # Pour ne pas déployer SearXNG du tout, supprimez ces deux services et
+  # laissez SEARXNG_MCP_URL vide.
   # ─────────────────────────────────────────────────────────────────
   searxng:
     image: searxng/searxng:latest
     restart: unless-stopped
-    profiles: ['searxng']
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     expose:
@@ -100,7 +100,6 @@ services:
       context: .
       dockerfile: searxng-mcp/Dockerfile
     restart: unless-stopped
-    profiles: ['searxng']
     depends_on:
       - searxng
     environment:
