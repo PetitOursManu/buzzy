@@ -89,7 +89,7 @@ Buzzy est prêt pour **Coolify** via son `docker-compose.yml` (Coolify n'utilise
 
 4. **Déployez.** Le service `app` a un *healthcheck* (`/api/health`) : Coolify attend qu'il soit sain. Les migrations Prisma et la création du compte admin s'exécutent automatiquement au démarrage. Le volume `buzzy_postgres_data` persiste la base.
 
-> **Recherche web SearXNG sur Coolify** : décommentez le bloc `searxng` / `searxng-mcp` du `docker-compose.yml` et ajoutez `SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp` aux variables du service `app` (voir la section « Recherche web MCP » plus bas).
+> **Recherche web SearXNG sur Coolify** : pas besoin d'éditer le compose (impossible en déploiement Git). Ajoutez simplement **deux variables d'environnement** dans Coolify — `COMPOSE_PROFILES=searxng` et `SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp` — puis redéployez (voir la section « Recherche web MCP » plus bas).
 >
 > **Autre reverse-proxy que Coolify ?** Le `docker-compose.yml` fournit aussi des **labels Traefik commentés** (service `app`) : décommentez-les et adaptez le domaine.
 
@@ -211,22 +211,26 @@ Vous pouvez également ajouter **n'importe quel serveur MCP personnalisé** — 
 
 ### Recherche web 100% gratuite et auto-hébergée (SearXNG)
 
-Buzzy est livré avec un fichier **`docker-compose.override.yml`** (chargé **automatiquement** par `docker compose up`) qui déploie deux services à côté de l'app :
+Le `docker-compose.yml` inclut deux services **désactivés par défaut** derrière le profil Docker Compose `searxng` :
 
 - **`searxng`** — moteur de recherche (format JSON activé via [`searxng/settings.yml`](searxng/settings.yml)) ;
 - **`searxng-mcp`** — wrapper qui expose SearXNG en **MCP Streamable HTTP** (`/mcp`) via [`searxng-mcp/Dockerfile`](searxng-mcp/Dockerfile) (mcp-searxng + supergateway).
 
-```bash
-docker compose up -d --build
+**Activation — uniquement via 2 variables d'environnement**, sans jamais éditer le compose (valable en local ET sur Coolify) :
+
+```
+COMPOSE_PROFILES=searxng
+SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp
 ```
 
-Au démarrage, l'app lit la variable `SEARXNG_MCP_URL` et **pré-enregistre automatiquement** le serveur MCP `http://searxng-mcp:8000/mcp` (désactivé). Il suffit alors d'aller dans **Paramètres → Recherche Web (MCP)** et de le cocher **Actif** — aucune clé API, aucune configuration manuelle.
+- **En local** : décommentez ces deux lignes dans votre `.env`, puis `docker compose up -d --build`.
+- **Sur Coolify** : ajoutez-les dans l'onglet *Environment Variables* de la ressource, puis redéployez.
 
-> **Pour désactiver** cette recherche web auto-hébergée : renommez ou supprimez `docker-compose.override.yml` (par ex. `docker-compose.override.yml.disabled`).
+Au démarrage, l'app lit `SEARXNG_MCP_URL` et **pré-enregistre automatiquement** le serveur MCP (désactivé). Il suffit alors d'aller dans **Paramètres → Recherche Web (MCP)** et de le cocher **Actif** — aucune clé API, aucune configuration manuelle.
+
+> Sans ces variables, les services SearXNG ne sont pas déployés (profil inactif) et Buzzy fonctionne normalement, sources marquées « à vérifier ».
 >
-> **Note d'architecture** : une application web ne peut pas provisionner d'infrastructure. Buzzy ne *démarre* pas de serveur MCP depuis un clic dans l'UI (cela exigerait l'accès au démon Docker de l'hôte, un risque de sécurité, et est interdit par conception). L'approche retenue — déploiement via Compose + pré-enregistrement automatique — offre l'expérience la plus proche de « ça marche en un clic » sans compromettre la sécurité.
-
-Le `docker-compose.yml` conserve par ailleurs un **bloc commenté** documentant la même intégration, pour référence.
+> **Note d'architecture** : une application web ne peut pas provisionner d'infrastructure. Buzzy ne *démarre* pas de serveur MCP depuis un clic dans l'UI (cela exigerait l'accès au démon Docker de l'hôte, un risque de sécurité, et est interdit par conception). L'approche retenue — services derrière un profil Compose + pré-enregistrement automatique — offre l'expérience la plus proche de « ça marche en un clic » sans compromettre la sécurité.
 
 ---
 
