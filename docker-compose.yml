@@ -26,7 +26,10 @@ services:
       # Coolify : génère un domaine et route le proxy vers le port 3000.
       # Sans Coolify, cette variable reste vide et est ignorée.
       SERVICE_FQDN_APP_3000: ''
-      DATABASE_URL: ${DATABASE_URL:-postgresql://buzzy:buzzy@db:5432/buzzy}
+      # Se déduit automatiquement des variables POSTGRES_* : définir seulement
+      # POSTGRES_PASSWORD suffit, l'URL reste cohérente (cause n°1 des boucles
+      # de redémarrage : un mot de passe changé d'un côté seulement).
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-buzzy}:${POSTGRES_PASSWORD:-buzzy}@db:5432/${POSTGRES_DB:-buzzy}}
       JWT_SECRET: ${JWT_SECRET:-change-me}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-bytes-long-secret!!}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}

@@ -76,6 +76,21 @@ async function main() {
   });
 }
 
+// Un crash silencieux en production est indébogable : on trace explicitement
+// la cause avant de laisser le superviseur (Docker/Coolify) redémarrer.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] Promesse rejetée non gérée :', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] Exception non interceptée :', err);
+  // Sortie explicite : l'état du processus n'est plus fiable.
+  process.exit(1);
+});
+process.on('SIGTERM', () => {
+  console.log('[shutdown] SIGTERM reçu, arrêt propre.');
+  prisma.$disconnect().finally(() => process.exit(0));
+});
+
 main().catch(async (e) => {
   console.error('Échec du démarrage du serveur :', e);
   await prisma.$disconnect();
