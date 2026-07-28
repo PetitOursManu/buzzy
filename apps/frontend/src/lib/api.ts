@@ -153,6 +153,20 @@ export const eventsApi = {
     const qs = q.toString();
     return request<{ events: EventItem[]; total: number }>(`/events${qs ? `?${qs}` : ''}`);
   },
+  createManual: (data: {
+    title: string;
+    description: string;
+    eventDate?: string | null;
+    scope?: EventScope;
+    theme?: string;
+    region?: string | null;
+  }) => request<EventItem>('/events/manual', { method: 'POST', body: JSON.stringify(data) }),
+  rephrase: (id: string) => request<EventItem>(`/events/${id}/rephrase`, { method: 'POST' }),
+  deleteHistory: (exceptIds: string[]) =>
+    request<{ deleted: number }>('/events', {
+      method: 'DELETE',
+      body: JSON.stringify({ exceptIds }),
+    }),
 };
 
 /* ─── Calendar ─────────────────────────────────────────────────── */

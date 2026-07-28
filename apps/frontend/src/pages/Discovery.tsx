@@ -240,6 +240,27 @@ export function DiscoveryPage() {
   // Affichage trié selon le mode choisi.
   const sortedEvents = useMemo(() => sortEvents(events, sortMode), [events, sortMode]);
 
+  // Historique = événements persistés, hors ceux affichés en « nouveaux ».
+  const newEventIds = useMemo(() => new Set(events.map((e) => e.id)), [events]);
+  const historyEvents = useMemo(
+    () => sortEvents((historyQuery.data?.events ?? []).filter((e) => !newEventIds.has(e.id)), sortMode),
+    [historyQuery.data, newEventIds, sortMode],
+  );
+
+  const deleteHistory = useMutation({
+    mutationFn: () => eventsApi.deleteHistory(events.map((e) => e.id)),
+    onSuccess: (r) => {
+      toast(`Historique supprimé (${r.deleted} événement(s)).`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
+
+  const updateNewEvent = (u: EventItem) => setEvents((prev) => prev.map((e) => (e.id === u.id ? u : e)));
+  const invalidateHistory = () => queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
+
+  const hasSort = events.length > 0 || historyEvents.length > 0;
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -441,9 +462,7 @@ export function DiscoveryPage() {
       )}
 
       {/* ─── Barre de tri ─── */}
-      {!isFirstGen &&
-        !plan.isPending &&
-        (events.length > 0 || (historyQuery.data?.events?.length ?? 0) > 0) && (
+      {!isFirstGen && !plan.isPending && hasSort && (
           <div className="flex items-center justify-end gap-2">
             <label htmlFor="sort-mode" className="text-sm text-muted">
               Trier par :
@@ -472,43 +491,93 @@ export function DiscoveryPage() {
         </div>
       ) : (
         <>
-          {/* AnimatePresence toujours monté : les cartes s'animent en sortie
-              lorsqu'on vide la liste (ex : nouveau « Planifier & générer »). */}
-          <motion.div layout className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <AnimatePresence mode="popLayout">
-              {sortedEvents.map((ev) => (
-                <EventCard key={ev.id} event={ev} selected={selectedIds.includes(ev.id)} onToggleSelect={toggle} />
-              ))}
-            </AnimatePresence>
-          </motion.div>
-
+          {/* ─── Nouveaux événements générés ─── */}
           {events.length > 0 && (
-            <div className="flex justify-center">
-              <button
-                className="btn-ghost flex items-center gap-2"
-                onClick={() => generate.mutate({ mode: 'more' })}
-                disabled={generate.isPending}
-              >
-                {isMoreGen ? <Spinner /> : <span aria-hidden>➕</span>}
-                Afficher plus
-              </button>
-            </div>
+            <section className="flex flex-col gap-4">
+              <h2 className="text-lg font-display font-semibold flex items-center gap-2">
+                <span aria-hidden>✨</span> Nouveaux événements générés
+                <span className="text-sm font-normal text-muted">({events.length})</span>
+              </h2>
+              <motion.div layout className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <AnimatePresence mode="popLayout">
+                  {sortedEvents.map((ev) => (
+                    <EventCard
+                      key={ev.id}
+                      event={ev}
+                      selected={selectedIds.includes(ev.id)}
+                      onToggleSelect={toggle}
+                      onRephrased={updateNewEvent}
+                    />
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+              <div className="flex justify-center">
+                <button
+                  className="btn-ghost flex items-center gap-2"
+                  onClick={() => generate.mutate({ mode: 'more' })}
+                  disabled={generate.isPending}
+                >
+                  {isMoreGen ? <Spinner /> : <span aria-hidden>➕</span>}
+                  Afficher plus
+                </button>
+              </div>
+            </section>
           )}
 
-          {events.length === 0 && !plan.isPending && (
-            <HistoryOrEmpty
-              history={sortEvents(historyQuery.data?.events ?? [], sortMode)}
-              loading={historyQuery.isLoading}
-              onToggle={toggle}
-              selectedIds={selectedIds}
-            />
-          )}
-
-          {events.length === 0 && plan.isPending && (
+          {plan.isPending && events.length === 0 && (
             <div className="glass rounded-2xl p-10 text-center flex flex-col items-center gap-3">
               <Spinner className="h-6 w-6" />
               <span className="text-secondary">Élaboration du plan en cours…</span>
             </div>
+          )}
+
+          {/* ─── Historique ─── */}
+          {historyQuery.isLoading && events.length === 0 ? (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <CardSkeleton key={i} />
+              ))}
+            </div>
+          ) : historyEvents.length > 0 ? (
+            <section className="flex flex-col gap-4 border-t border-[color:var(--glass-border)] pt-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-display font-semibold flex items-center gap-2 text-secondary">
+                  <span aria-hidden>🕓</span> Historique
+                  <span className="text-sm font-normal text-muted">({historyEvents.length})</span>
+                </h2>
+                <button
+                  className="btn-ghost !py-1.5 !px-3 text-sm text-red-500 flex items-center gap-1.5"
+                  onClick={() => {
+                    if (confirm('Supprimer définitivement tout l\'historique des événements générés ?')) {
+                      deleteHistory.mutate();
+                    }
+                  }}
+                  disabled={deleteHistory.isPending}
+                >
+                  {deleteHistory.isPending ? <Spinner /> : '🗑'} Supprimer l'historique
+                </button>
+              </div>
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {historyEvents.map((ev) => (
+                  <EventCard
+                    key={ev.id}
+                    event={ev}
+                    selected={selectedIds.includes(ev.id)}
+                    onToggleSelect={toggle}
+                    onRephrased={invalidateHistory}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : (
+            events.length === 0 &&
+            !plan.isPending && (
+              <EmptyState
+                icon="🔭"
+                title="Aucun événement pour l'instant"
+                description="Choisissez vos filtres puis cliquez sur « Générer des événements » pour lancer votre veille."
+              />
+            )
           )}
         </>
       )}
@@ -535,47 +604,6 @@ export function DiscoveryPage() {
           </div>
         </div>
       </Modal>
-    </div>
-  );
-}
-
-function HistoryOrEmpty({
-  history,
-  loading,
-  onToggle,
-  selectedIds,
-}: {
-  history: EventItem[];
-  loading: boolean;
-  onToggle: (id: string) => void;
-  selectedIds: string[];
-}) {
-  if (loading) {
-    return (
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <CardSkeleton key={i} />
-        ))}
-      </div>
-    );
-  }
-  if (history.length === 0) {
-    return (
-      <EmptyState
-        icon="🔭"
-        title="Aucun événement pour l'instant"
-        description="Choisissez vos filtres puis cliquez sur « Générer des événements » pour lancer votre veille."
-      />
-    );
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-lg font-display font-semibold text-secondary">Historique récent</h2>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {history.map((ev) => (
-          <EventCard key={ev.id} event={ev} selected={selectedIds.includes(ev.id)} onToggleSelect={onToggle} />
-        ))}
-      </div>
     </div>
   );
 }

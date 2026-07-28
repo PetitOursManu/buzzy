@@ -17,6 +17,8 @@ import {
   eventGenerationUserPrompt,
   eventPlanSystemPrompt,
   eventPlanUserPrompt,
+  eventRephraseSystemPrompt,
+  eventRephraseUserPrompt,
   type EventGenParams,
   type DateTarget,
 } from '../prompts';
@@ -316,6 +318,26 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     toolCallingUnsupported,
     notice,
   };
+}
+
+/** Génère une alternative (reformulation) du titre et de la description d'un événement. */
+export async function rephraseEvent(id: string): Promise<PrismaEvent> {
+  const config = await getActiveAiConfig();
+  const event = await prisma.event.findUnique({ where: { id } });
+  if (!event) {
+    throw new AiRequestError('Événement introuvable.');
+  }
+  const messages: ChatMessage[] = [
+    { role: 'system', content: eventRephraseSystemPrompt() },
+    { role: 'user', content: eventRephraseUserPrompt(event.title, event.description) },
+  ];
+  const res = await chatCompletion(config, { messages, temperature: 0.9 });
+  const parsed = extractJson(res.message.content ?? '') as
+    | { title?: string; description?: string }
+    | null;
+  const title = (parsed?.title ?? event.title).toString().trim().slice(0, 300) || event.title;
+  const description = (parsed?.description ?? event.description).toString().trim() || event.description;
+  return prisma.event.update({ where: { id }, data: { title, description } });
 }
 
 export interface PlanInput {

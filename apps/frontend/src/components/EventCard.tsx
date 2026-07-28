@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { useMutation } from '@tanstack/react-query';
 import type { EventItem, Network } from '../lib/types';
 import { SCOPE_LABEL, NETWORK_EMOJI, NETWORK_LABEL } from '../lib/constants';
-import { Chip } from './ui';
+import { Chip, Spinner } from './ui';
 import { useToast } from '../hooks/useToast';
+import { eventsApi, ApiError } from '../lib/api';
 
 function formatEventWhen(ev: EventItem): string {
   if (ev.eventDate) {
@@ -73,13 +75,25 @@ export function EventCard({
   event,
   selected,
   onToggleSelect,
+  onRephrased,
 }: {
   event: EventItem;
   selected: boolean;
   onToggleSelect: (id: string) => void;
+  onRephrased?: (updated: EventItem) => void;
 }) {
+  const { toast } = useToast();
   const hasNetworkDescriptions =
     event.networkDescriptions && Object.keys(event.networkDescriptions).length > 0;
+
+  const rephrase = useMutation({
+    mutationFn: () => eventsApi.rephrase(event.id),
+    onSuccess: (updated) => {
+      toast('Alternative générée.', 'success');
+      onRephrased?.(updated);
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Erreur lors de la génération.', 'error'),
+  });
 
   return (
     <motion.article
@@ -132,6 +146,16 @@ export function EventCard({
       )}
 
       {hasNetworkDescriptions && <NetworkDescriptions descriptions={event.networkDescriptions!} />}
+
+      <button
+        type="button"
+        onClick={() => rephrase.mutate()}
+        disabled={rephrase.isPending}
+        className="btn-ghost !py-1.5 text-xs flex items-center justify-center gap-1.5"
+        title="Reformuler le titre et la description via l'IA"
+      >
+        {rephrase.isPending ? <Spinner /> : '🔄'} Générer une alternative (titre & description)
+      </button>
 
       <label className="mt-1 flex items-center gap-2 cursor-pointer select-none border-t border-[color:var(--glass-border)] pt-3">
         <input

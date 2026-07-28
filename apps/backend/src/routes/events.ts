@@ -3,13 +3,72 @@ import { prisma } from '../lib/prisma';
 import { validate, validated } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
-import { eventGenerateSchema, eventPlanSchema, eventListQuerySchema } from './schemas';
-import { generateEvents, planEvents } from '../services/event.service';
+import {
+  eventGenerateSchema,
+  eventPlanSchema,
+  eventListQuerySchema,
+  manualEventSchema,
+  deleteEventsSchema,
+} from './schemas';
+import { generateEvents, planEvents, rephraseEvent } from '../services/event.service';
 import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 import type { EventScope, Prisma } from '@prisma/client';
 
 const router = Router();
 router.use(requireAuth);
+
+/** Création manuelle d'un événement (date + titre + description). */
+router.post('/manual', validate(manualEventSchema), async (req, res) => {
+  const b = req.body as {
+    title: string;
+    description: string;
+    eventDate?: string | null;
+    eventPeriod?: string | null;
+    scope: EventScope;
+    region?: string | null;
+    theme: string;
+  };
+  let eventDate: Date | null = null;
+  if (b.eventDate) {
+    const d = new Date(b.eventDate);
+    if (!isNaN(d.getTime())) eventDate = d;
+  }
+  const event = await prisma.event.create({
+    data: {
+      title: b.title.trim(),
+      description: b.description.trim(),
+      scope: b.scope,
+      region: b.region?.trim() || null,
+      theme: b.theme?.trim() || 'Autre',
+      eventDate,
+      eventPeriod: b.eventPeriod?.trim() || null,
+      sources: [],
+      verified: false,
+    },
+  });
+  return res.status(201).json(event);
+});
+
+/** Génère une alternative (reformulation IA) du titre et de la description. */
+router.post('/:id/rephrase', aiGenerationLimiter, async (req, res) => {
+  try {
+    const event = await rephraseEvent(req.params.id);
+    return res.json(event);
+  } catch (e) {
+    if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
+    if (e instanceof AiRequestError) return res.status(502).json({ error: e.message });
+    console.error('Erreur alternative événement:', e);
+    return res.status(500).json({ error: "Erreur lors de la génération de l'alternative." });
+  }
+});
+
+/** Supprime l'historique des événements (sauf ceux passés dans exceptIds). */
+router.delete('/', validate(deleteEventsSchema), async (req, res) => {
+  const { exceptIds } = req.body as { exceptIds: string[] };
+  const where = exceptIds.length > 0 ? { id: { notIn: exceptIds } } : {};
+  const result = await prisma.event.deleteMany({ where });
+  return res.json({ deleted: result.count });
+});
 
 type ScopeInput = {
   scope?: EventScope;

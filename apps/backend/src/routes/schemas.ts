@@ -101,6 +101,20 @@ export const eventPlanSchema = z.object({
   count: z.number().int().min(1).max(12).optional().default(9),
 });
 
+export const manualEventSchema = z.object({
+  title: z.string().min(1, 'Titre requis.').max(300),
+  description: z.string().min(1, 'Description requise.').max(4000),
+  eventDate: z.string().optional().nullable(),
+  eventPeriod: z.string().max(120).optional().nullable(),
+  scope: scopeEnum.optional().default('NATIONAL'),
+  region: z.string().max(200).optional().nullable(),
+  theme: z.string().max(120).optional().default('Autre'),
+});
+
+export const deleteEventsSchema = z.object({
+  exceptIds: z.array(z.string()).max(1000).optional().default([]),
+});
+
 export const eventListQuerySchema = z.object({
   scope: z.enum(['GLOBAL', 'NATIONAL', 'REGIONAL', 'LOCAL']).optional(),
   theme: z.string().max(120).optional(),

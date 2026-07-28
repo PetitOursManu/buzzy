@@ -186,6 +186,25 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
   ].join('\n');
 }
 
+/* ─── Alternative d'un événement (reformulation) ───────────────── */
+
+export function eventRephraseSystemPrompt(): string {
+  return [
+    "Tu es un expert en rédaction et veille d'événements.",
+    "On te donne le titre et la description d'un événement. Propose une ALTERNATIVE : une reformulation différente du titre ET de la description, en conservant le même événement et les mêmes faits, mais avec un angle et une formulation nouveaux.",
+    'Réponds UNIQUEMENT en JSON valide : { "title": string, "description": string }.',
+  ].join(' ');
+}
+
+export function eventRephraseUserPrompt(title: string, description: string): string {
+  return [
+    `Titre actuel : ${title}`,
+    `Description actuelle : ${description}`,
+    '',
+    'Propose une alternative : un titre court reformulé et une description de 2 à 3 phrases reformulée.',
+  ].join('\n');
+}
+
 /* ─── Mode planification ───────────────────────────────────────── */
 
 export function eventPlanSystemPrompt(): string {
