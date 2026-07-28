@@ -6,6 +6,7 @@ import type { Network, PostItem, PostPlan } from '../lib/types';
 import { NETWORKS } from '../lib/constants';
 import { CardSkeleton, EmptyState, Field, GlassPanel, Spinner } from '../components/ui';
 import { ListView, MonthView, WeekView } from '../components/CalendarViews';
+import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
 import { useToast } from '../hooks/useToast';
 import { useSelection } from '../hooks/useSelection';
@@ -129,22 +130,11 @@ export function CalendarPage() {
         </Field>
 
         <Field label="Réseaux ciblés">
-          <div className="flex flex-wrap gap-2">
-            {NETWORKS.map((n) => (
-              <button
-                key={n.value}
-                type="button"
-                onClick={() => toggleNetwork(n.value)}
-                className={
-                  networks.includes(n.value)
-                    ? 'chip !bg-honey-gradient !text-[#1a1206] !border-transparent'
-                    : 'chip hover:border-[color:var(--honey)]'
-                }
-              >
-                {n.emoji} {n.label}
-              </button>
-            ))}
-          </div>
+          <NetworkSelector
+            networks={NETWORKS.map((n) => n.value)}
+            selected={networks}
+            onToggle={toggleNetwork}
+          />
         </Field>
 
         <Field label="Source des événements">

@@ -24,6 +24,13 @@ type DateMode = 'month' | 'date' | 'range';
 const now = new Date();
 const MAX_PRIORITY = 2;
 
+const SCOPE_ICON: Record<EventScope, string> = {
+  GLOBAL: '🌍',
+  NATIONAL: '🏳️',
+  REGIONAL: '🗺️',
+  LOCAL: '📍',
+};
+
 export function DiscoveryPage() {
   const { toast } = useToast();
   const { selectedIds, toggle } = useSelection();
@@ -169,19 +176,18 @@ export function DiscoveryPage() {
       <GlassPanel className="flex flex-col gap-5">
         <div className="grid md:grid-cols-2 gap-5">
           <Field label="Portée géographique" hint="Sélection multiple possible.">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2.5">
               {SCOPES.map((s) => (
                 <button
                   key={s.value}
                   type="button"
                   onClick={() => toggleScope(s.value)}
                   aria-pressed={scopes.includes(s.value)}
-                  className={
-                    scopes.includes(s.value)
-                      ? 'btn-primary !py-1.5 !px-3 text-sm'
-                      : 'btn-ghost !py-1.5 !px-3 text-sm'
-                  }
+                  className={scopes.includes(s.value) ? 'opt-tag opt-tag--active' : 'opt-tag'}
                 >
+                  <span aria-hidden className="text-base">
+                    {SCOPE_ICON[s.value]}
+                  </span>
                   {s.label}
                 </button>
               ))}
@@ -206,19 +212,16 @@ export function DiscoveryPage() {
         </div>
 
         <Field label="Thèmes (multi-sélection)">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2.5">
             {THEMES.map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => toggleTheme(t)}
                 aria-pressed={themes.includes(t)}
-                className={
-                  themes.includes(t)
-                    ? 'chip !bg-honey-gradient !text-[#1a1206] !border-transparent'
-                    : 'chip hover:border-[color:var(--honey)]'
-                }
+                className={themes.includes(t) ? 'opt-tag opt-tag--active' : 'opt-tag'}
               >
+                {themes.includes(t) && <span aria-hidden>✓</span>}
                 {t}
               </button>
             ))}
@@ -239,7 +242,7 @@ export function DiscoveryPage() {
             label={`Thèmes prioritaires (max ${MAX_PRIORITY})`}
             hint="Cliquez sur ⭐ pour prioriser jusqu'à deux thèmes : ils seront privilégiés lors de la génération."
           >
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2.5">
               {effectiveThemes.map((t) => {
                 const isPriority = priorityThemes.includes(t);
                 return (
@@ -249,14 +252,12 @@ export function DiscoveryPage() {
                     onClick={() => togglePriority(t)}
                     aria-pressed={isPriority}
                     className={
-                      isPriority
-                        ? 'chip !bg-grape !text-white !border-transparent shadow-glow-grape'
-                        : 'chip hover:border-[color:var(--grape)]'
+                      isPriority ? 'opt-tag opt-tag--priority' : 'opt-tag hover:!border-[color:var(--grape)]'
                     }
                   >
                     <span aria-hidden>{isPriority ? '⭐' : '☆'}</span> {t}
                     {isPriority && (
-                      <span className="ml-1 opacity-80">#{priorityThemes.indexOf(t) + 1}</span>
+                      <span className="opt-tag__badge">#{priorityThemes.indexOf(t) + 1}</span>
                     )}
                   </button>
                 );

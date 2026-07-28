@@ -4,6 +4,7 @@ import { settingsApi, ApiError } from '../../lib/api';
 import { Field, GlassPanel, Spinner } from '../../components/ui';
 import { TONES, NETWORKS } from '../../lib/constants';
 import type { Network, Tone } from '../../lib/types';
+import { NetworkSelector } from '../../components/NetworkIcon';
 import { useToast } from '../../hooks/useToast';
 
 export function ProfileTab() {
@@ -97,23 +98,11 @@ export function ProfileTab() {
         label="Réseaux sociaux préférés"
         hint="Pour chaque réseau coché, une description prête à publier (adaptée à sa longueur) sera générée pour CHAQUE événement découvert."
       >
-        <div className="flex flex-wrap gap-2">
-          {NETWORKS.map((n) => (
-            <button
-              key={n.value}
-              type="button"
-              onClick={() => toggleNetwork(n.value)}
-              aria-pressed={preferredNetworks.includes(n.value)}
-              className={
-                preferredNetworks.includes(n.value)
-                  ? 'chip !bg-honey-gradient !text-[#1a1206] !border-transparent'
-                  : 'chip hover:border-[color:var(--honey)]'
-              }
-            >
-              {n.emoji} {n.label}
-            </button>
-          ))}
-        </div>
+        <NetworkSelector
+          networks={NETWORKS.map((n) => n.value)}
+          selected={preferredNetworks}
+          onToggle={toggleNetwork}
+        />
       </Field>
 
       <div>
