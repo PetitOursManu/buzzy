@@ -117,6 +117,7 @@ export function DiscoveryPage() {
   const [priorityThemes, setPriorityThemes] = usePersistentState<string[]>('buzzy-f-priority', []);
   const [planningEnabled, setPlanningEnabled] = usePersistentState<boolean>('buzzy-f-planning', false);
   const [sortMode, setSortMode] = usePersistentState<SortMode>('buzzy-f-sort', 'date-asc');
+  const [strictSources, setStrictSources] = usePersistentState<boolean>('buzzy-f-strict', false);
 
   const [dateMode, setDateMode] = usePersistentState<DateMode>('buzzy-f-dateMode', 'month');
   const [month, setMonth] = usePersistentState<number>('buzzy-f-month', now.getMonth() + 1);
@@ -195,6 +196,7 @@ export function DiscoveryPage() {
         excludeIds: args.mode === 'more' ? events.map((e) => e.id) : [],
         count: args.mode === 'more' ? 6 : 9,
         plan: args.plan,
+        strictSources,
       });
     },
     onSuccess: (data, args) => {
@@ -422,21 +424,40 @@ export function DiscoveryPage() {
           )}
         </Field>
 
-        {/* ─── Mode planification ─── */}
-        <label className="flex items-start gap-2.5 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={planningEnabled}
-            onChange={(e) => setPlanningEnabled(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[color:var(--grape)]"
-          />
-          <span>
-            <span className="text-sm font-medium">Mode planification</span>
-            <span className="block text-xs text-muted">
-              L'IA propose d'abord un plan que vous validez avant de générer — meilleures réponses.
+        {/* ─── Options de fiabilité ─── */}
+        <div className="flex flex-col gap-3">
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={planningEnabled}
+              onChange={(e) => setPlanningEnabled(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[color:var(--grape)]"
+            />
+            <span>
+              <span className="text-sm font-medium">Mode planification</span>
+              <span className="block text-xs text-muted">
+                L'IA propose d'abord un plan que vous validez avant de lancer — meilleures réponses.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={strictSources}
+              onChange={(e) => setStrictSources(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[color:var(--honey)]"
+            />
+            <span>
+              <span className="text-sm font-medium">🔒 Mode strict — zéro invention</span>
+              <span className="block text-xs text-muted">
+                N'affiche QUE les événements dont au moins un lien source répond réellement. Les
+                événements non vérifiables sont écartés (liste plus courte, mais fiable). Recommandé
+                avec la recherche web activée.
+              </span>
+            </span>
+          </label>
+        </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -445,7 +466,7 @@ export function DiscoveryPage() {
             disabled={generate.isPending || plan.isPending}
           >
             {isFirstGen || plan.isPending ? <Spinner /> : <span aria-hidden>✨</span>}
-            {planningEnabled ? 'Planifier & générer' : 'Générer des événements'}
+            {planningEnabled ? 'Planifier & trouver' : 'Trouver les évènements'}
           </button>
           {selectedIds.length > 0 && (
             <Link to="/calendrier" className="btn-ghost flex items-center gap-2 text-sm">
@@ -575,7 +596,7 @@ export function DiscoveryPage() {
               <EmptyState
                 icon="🔭"
                 title="Aucun événement pour l'instant"
-                description="Choisissez vos filtres puis cliquez sur « Générer des événements » pour lancer votre veille."
+                description="Choisissez vos filtres puis cliquez sur « Trouver les évènements » pour lancer votre veille."
               />
             )
           )}

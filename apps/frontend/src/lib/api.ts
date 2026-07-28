@@ -128,6 +128,7 @@ export const eventsApi = {
     excludeIds: string[];
     count?: number;
     plan?: string;
+    strictSources?: boolean;
   }) =>
     request<{ events: EventItem[]; webSearchUsed: boolean; notice: string | null }>(
       '/events/generate',

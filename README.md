@@ -175,7 +175,15 @@ Toutes les routes (hors `login`/`logout`/`health`) exigent le cookie JWT.
 
 ## 🔎 Fiabilité des sources
 
-Buzzy **teste réellement chaque lien** produit par l'IA avant de l'enregistrer (requête HTTP, suivi des redirections) :
+Buzzy applique **trois garde-fous** contre les événements inventés :
+
+1. **Prompts anti-invention** — le modèle est instruit de ne recenser que des événements réels, avec une consigne explicite : *« mieux vaut renvoyer peu d'événements, voire aucun, que d'en inventer un seul »*. Le nombre demandé est un **maximum**, jamais un objectif (c'est la pression du quota qui pousse un LLM à combler par de l'invention).
+2. **Auto-déclaration de certitude** — chaque événement porte un champ `certainty` ; tout événement signalé « incertain » est **automatiquement écarté** côté serveur.
+3. **Mode strict** (case à cocher sur la page Découverte) — seuls les événements dont **au moins un lien source répond réellement** sont conservés. Liste plus courte, mais fiable.
+
+> ⚠️ **Limite honnête** : sans recherche web, aucun modèle d'IA ne peut *garantir* de ne rien inventer — il écrit de mémoire, sans moyen de vérifier. Pour une fiabilité maximale, activez la **recherche web MCP** *et* le **mode strict** : les événements proviennent alors de résultats de recherche réels et sont retenus uniquement si leurs sources répondent.
+
+Par ailleurs, Buzzy **teste réellement chaque lien** produit par l'IA avant de l'enregistrer (requête HTTP, suivi des redirections) :
 
 - **lien mort (404/410, domaine inexistant, timeout)** → **supprimé** automatiquement ;
 - **redirection vers l'accueil** (la page précise n'existe pas) → conservé mais signalé ↪️ ;

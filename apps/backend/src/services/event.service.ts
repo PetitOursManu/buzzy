@@ -36,6 +36,8 @@ export interface GeneratedEventInput {
   excludeIds: string[];
   count: number;
   plan?: string;
+  /** Mode strict : n'accepter que les événements avec au moins un lien qui répond. */
+  strictSources?: boolean;
 }
 
 export interface EventGenerationResult {
@@ -55,6 +57,7 @@ interface RawEvent {
   eventPeriod?: string | null;
   sources?: Array<{ title?: string; url?: string }>;
   networkDescriptions?: Record<string, unknown>;
+  certainty?: string;
 }
 
 const VALID_SCOPES: EventScope[] = ['GLOBAL', 'NATIONAL', 'REGIONAL', 'LOCAL'];
@@ -270,19 +273,37 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   }
 
   const parsed = extractJson(finalText) as { events?: RawEvent[] } | null;
-  const rawEvents = parsed?.events ?? [];
-  if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
+  // Une réponse illisible est une erreur ; une liste VIDE est un résultat
+  // légitime (le modèle n'a trouvé aucun événement dont il soit certain).
+  if (!parsed || !Array.isArray(parsed.events)) {
     throw new AiRequestError(
-      "Le modèle n'a pas renvoyé d'événements exploitables. Réessayez ou changez de modèle.",
+      "Le modèle n'a pas renvoyé de réponse exploitable. Réessayez ou changez de modèle.",
     );
   }
+  const rawEvents = parsed.events;
 
   const created: PrismaEvent[] = [];
+  let discardedUncertain = 0;
+  let discardedUnsourced = 0;
+
   for (const raw of rawEvents) {
     if (!raw.title || !raw.description) continue;
+
+    // Le modèle a lui-même signalé un doute : on écarte sans discuter.
+    if (raw.certainty && !/^certain/i.test(raw.certainty.toString().trim())) {
+      discardedUncertain++;
+      continue;
+    }
+
     // Vérification réseau réelle des liens : on écarte les 404 / liens morts
     // et on qualifie chaque source (ok / redirigée / non vérifiable).
     const { sources, hasLiveSource } = await verifySources(cleanSources(raw.sources));
+
+    // Mode strict : aucun événement sans au moins une source qui répond.
+    if (input.strictSources && !hasLiveSource) {
+      discardedUnsourced++;
+      continue;
+    }
     // "verified" = la recherche web a servi ET au moins un lien répond vraiment.
     const verified = toolsUsed && hasLiveSource;
     let eventDate: Date | null = null;
@@ -308,12 +329,34 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     created.push(event);
   }
 
-  let notice: string | undefined;
+  const notices: string[] = [];
   if (webSearchRequested && !webSearchAvailable) {
-    notice = "La recherche web MCP est activée mais aucun serveur n'a pu être contacté. Génération effectuée sans recherche web.";
+    notices.push(
+      "La recherche web MCP est activée mais aucun serveur n'a pu être contacté : recherche effectuée sans le web.",
+    );
   } else if (toolCallingUnsupported) {
-    notice = "Le modèle sélectionné ne prend pas en charge le tool calling : génération effectuée sans recherche web.";
+    notices.push(
+      "Le modèle sélectionné ne prend pas en charge le tool calling : recherche effectuée sans le web.",
+    );
   }
+  const discarded = discardedUncertain + discardedUnsourced;
+  if (discarded > 0) {
+    const details: string[] = [];
+    if (discardedUncertain > 0) details.push(`${discardedUncertain} signalé(s) incertain(s) par le modèle`);
+    if (discardedUnsourced > 0) details.push(`${discardedUnsourced} sans source vérifiable (mode strict)`);
+    notices.push(`${discarded} événement(s) écarté(s) : ${details.join(', ')}.`);
+  }
+  if (created.length === 0) {
+    notices.push(
+      "Aucun événement certain n'a été trouvé pour ces critères. Élargissez la période ou les thèmes, ou activez la recherche web pour de meilleurs résultats.",
+    );
+  }
+  if (!toolsUsed && created.length > 0) {
+    notices.push(
+      'Recherche effectuée sans web : les informations proviennent de la mémoire du modèle et restent à vérifier.',
+    );
+  }
+  const notice = notices.length > 0 ? notices.join(' ') : undefined;
 
   return {
     events: created,

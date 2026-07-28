@@ -88,6 +88,8 @@ export const eventGenerateSchema = z.object({
   count: z.number().int().min(1).max(12).optional().default(9),
   // Plan validé (mode planification).
   plan: z.string().max(6000).optional(),
+  // Mode strict : n'accepter que les événements avec une source qui répond.
+  strictSources: z.boolean().optional().default(false),
 });
 
 export const eventPlanSchema = z.object({

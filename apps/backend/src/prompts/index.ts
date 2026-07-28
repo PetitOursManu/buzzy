@@ -77,8 +77,10 @@ export function describeDateTarget(dt: DateTarget): string {
 
 export function eventGenerationSystemPrompt(webSearchEnabled: boolean): string {
   return [
-    "Tu es un assistant expert en veille d'événements et d'actualités pour la création de contenu sur les réseaux sociaux.",
-    "Ta mission : proposer des événements réels, pertinents et variés (journées mondiales, salons, festivals, conférences, dates marquantes, temps forts saisonniers, etc.) correspondant précisément aux critères fournis.",
+    "Tu es un documentaliste spécialisé dans la veille d'événements. Ton exigence absolue est l'EXACTITUDE FACTUELLE, jamais la quantité.",
+    "Ta mission : RECENSER des événements qui existent RÉELLEMENT (journées mondiales officielles, salons, festivals, conférences, temps forts récurrents…) correspondant aux critères fournis.",
+    "INTERDICTION ABSOLUE d'inventer : ne crée jamais un événement, un nom, une édition, une date ou un lieu qui n'existe pas. Tu ne dois JAMAIS extrapoler une « édition 2026 » d'un événement dont tu n'as pas connaissance, ni inventer un événement local plausible pour satisfaire une demande.",
+    "Il vaut infiniment mieux renvoyer PEU d'événements (voire aucun) que d'en inventer un seul. Un événement inventé est une faute grave ; une liste courte est un résultat parfaitement acceptable.",
     webSearchEnabled
       ? "Tu disposes d'outils de recherche web : utilise-les pour vérifier l'existence des événements. RÈGLE ABSOLUE sur les sources : n'indique QUE des URLs que tu as réellement vues dans les résultats de recherche, copiées à l'identique. N'invente, ne devine et ne complète JAMAIS une URL."
       : "Tu ne disposes PAS de recherche web : tu ne peux donc pas vérifier les URLs. RÈGLE ABSOLUE : ne donne que des URLs d'accueil de sites institutionnels dont tu es certain qu'ils existent (ex: https://www.unesco.org). N'invente JAMAIS de chemin profond (/articles/..., /events/2026/...) : ces liens n'existent presque jamais. En cas de doute, laisse le tableau sources VIDE.",
@@ -139,7 +141,8 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
   // Schéma JSON — on ajoute networkDescriptions seulement si des réseaux sont demandés.
   const eventShape: Record<string, unknown> = {
     title: 'string (titre court)',
-    description: 'string (2 à 3 phrases)',
+    description: 'string (2 à 3 phrases, uniquement des faits établis)',
+    certainty: '"certain" | "incertain" — sois honnête, les "incertain" sont écartés',
     scope: 'GLOBAL | NATIONAL | REGIONAL | LOCAL',
     region: 'string ou null',
     theme: 'string (un des thèmes demandés)',
@@ -158,7 +161,8 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
   }
 
   return [
-    `Propose ${params.count} événements ${describeScopesAndRegions(params)}, concernant ${describeDateTarget(params.dateTarget)}.`,
+    `Recense JUSQU'À ${params.count} événements ${describeScopesAndRegions(params)}, concernant ${describeDateTarget(params.dateTarget)}.`,
+    `${params.count} est un MAXIMUM, pas un objectif : n'inclus QUE les événements dont tu es certain. S'il n'en existe que 2 dont tu es sûr, n'en renvoie que 2. Si tu n'es sûr d'aucun, renvoie une liste vide.`,
     themesPart,
     ...(priorityPart ? [priorityPart] : []),
     excludePart,
@@ -167,7 +171,9 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
     networksPart,
     '',
     'Contraintes :',
-    '- Chaque événement doit être plausible et vérifiable.',
+    "- N'inclus QUE des événements réels et établis. Aucune invention, aucune extrapolation, aucun événement « probable ».",
+    '- Renseigne le champ "certainty" honnêtement : "certain" (événement officiel/récurrent que tu connais avec certitude, ou confirmé par une recherche) ou "incertain". Tout événement "incertain" sera automatiquement écarté — préfère l\'omettre.',
+    "- Si tu hésites sur l'existence, la date ou l'édition d'un événement : ne le mets pas.",
     ...(priorityPart
       ? ['- Consacre la majorité des événements aux thèmes prioritaires indiqués.']
       : []),

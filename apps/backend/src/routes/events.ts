@@ -101,6 +101,7 @@ router.post('/generate', aiGenerationLimiter, validate(eventGenerateSchema), asy
     excludeIds: string[];
     count: number;
     plan?: string;
+    strictSources?: boolean;
   };
   const { scopes, regions } = resolveScopesAndRegions(body);
   try {
@@ -113,6 +114,7 @@ router.post('/generate', aiGenerationLimiter, validate(eventGenerateSchema), asy
       excludeIds: body.excludeIds,
       count: body.count,
       plan: body.plan,
+      strictSources: body.strictSources,
     });
     return res.json({
       events: result.events,
