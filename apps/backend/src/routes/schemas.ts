@@ -185,6 +185,9 @@ export const postUpdateSchema = z.object({
   content: z.string().max(8000).optional(),
   hashtags: z.array(z.string().max(80)).max(30).optional(),
   status: z.enum(['DRAFT', 'APPROVED', 'PUBLISHED']).optional(),
+  // Date attribuée à la main, notamment pour replacer une publication dont
+  // l'événement était daté hors de la plage du calendrier.
+  scheduledDate: z.string().min(1).optional(),
 });
 
 /** Ajout manuel d'une publication dans un calendrier existant (sans IA). */

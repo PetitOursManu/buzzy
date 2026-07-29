@@ -78,6 +78,8 @@ export interface PostItem {
   relatedEventId: string | null;
   relatedEvent?: EventItem | null;
   status: PostStatus;
+  /** L'événement lié est daté hors de la plage : une date reste à attribuer. */
+  needsReschedule?: boolean;
   createdAt: string;
 }
 

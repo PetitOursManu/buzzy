@@ -97,5 +97,8 @@ model Post {
   relatedEventId String?
   relatedEvent   Event?     @relation(fields: [relatedEventId], references: [id])
   status         PostStatus @default(DRAFT)
+  // Vrai quand la date de l'événement lié tombe hors de la plage du calendrier :
+  // la publication attend qu'une date lui soit attribuée à la main.
+  needsReschedule Boolean   @default(false)
   createdAt      DateTime   @default(now())
 }

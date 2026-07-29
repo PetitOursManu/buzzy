@@ -96,6 +96,7 @@ export function ManualEventModal({
 
       // 2. Rattachement au calendrier choisi, si demandé.
       let addedPosts = 0;
+      let warning: string | undefined;
       if (addToCalendar && planId) {
         const res = await calendarApi.addEvent(planId, {
           eventId: event.id,
@@ -103,10 +104,11 @@ export function ManualEventModal({
           scheduledDate: date ? new Date(`${date}T10:00:00`).toISOString() : undefined,
         });
         addedPosts = res.posts.length;
+        warning = res.warning;
       }
-      return { event, addedPosts };
+      return { event, addedPosts, warning };
     },
-    onSuccess: ({ event, addedPosts }) => {
+    onSuccess: ({ event, addedPosts, warning }) => {
       queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
       if (addedPosts > 0) {
         queryClient.invalidateQueries({ queryKey: ['calendar'] });
@@ -114,6 +116,7 @@ export function ManualEventModal({
           `Événement ajouté et ${addedPosts} publication(s) créée(s) dans « ${selectedPlan?.name} ».`,
           'success',
         );
+        if (warning) toast(warning, 'info');
       } else {
         toast('Événement ajouté à la page principale.', 'success');
       }

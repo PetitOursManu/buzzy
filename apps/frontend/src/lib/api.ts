@@ -199,10 +199,10 @@ export const calendarApi = {
     planId: string,
     data: { eventId: string; networks?: Network[]; scheduledDate?: string },
   ) =>
-    request<{ posts: PostItem[]; postPlan: PostPlan }>(`/calendar/${planId}/events`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    request<{ posts: PostItem[]; postPlan: PostPlan; warning?: string }>(
+      `/calendar/${planId}/events`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
   list: () => request<PostPlan[]>('/calendar'),
   get: (id: string) => request<PostPlan>(`/calendar/${id}`),
   remove: (id: string) => request<{ ok: boolean; id: string }>(`/calendar/${id}`, { method: 'DELETE' }),
@@ -226,7 +226,13 @@ export const postsApi = {
   remove: (id: string) => request<{ ok: boolean; id: string }>(`/posts/${id}`, { method: 'DELETE' }),
   update: (
     id: string,
-    data: Partial<{ title: string; content: string; hashtags: string[]; status: string }>,
+    data: Partial<{
+      title: string;
+      content: string;
+      hashtags: string[];
+      status: string;
+      scheduledDate: string;
+    }>,
   ) => request<PostItem>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   regenerate: (id: string) => request<PostItem>(`/posts/${id}/regenerate`, { method: 'POST' }),
 };

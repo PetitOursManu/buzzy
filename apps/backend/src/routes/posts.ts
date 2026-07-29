@@ -56,7 +56,10 @@ router.post('/', validate(postCreateSchema), async (req, res) => {
 
 router.put('/:id', validate(postUpdateSchema), async (req, res) => {
   const { id } = req.params;
-  const existing = await prisma.post.findUnique({ where: { id } });
+  const existing = await prisma.post.findUnique({
+    where: { id },
+    include: { postPlan: true },
+  });
   if (!existing) return res.status(404).json({ error: 'Publication introuvable.' });
 
   const body = req.body as {
@@ -64,12 +67,32 @@ router.put('/:id', validate(postUpdateSchema), async (req, res) => {
     content?: string;
     hashtags?: string[];
     status?: 'DRAFT' | 'APPROVED' | 'PUBLISHED';
+    scheduledDate?: string;
   };
   const data: Record<string, unknown> = {};
   if (body.title !== undefined) data.title = body.title;
   if (body.content !== undefined) data.content = body.content;
   if (body.hashtags !== undefined) data.hashtags = body.hashtags.map((h) => h.replace(/^#/, ''));
   if (body.status !== undefined) data.status = body.status;
+
+  if (body.scheduledDate !== undefined) {
+    const d = new Date(body.scheduledDate);
+    if (isNaN(d.getTime())) {
+      return res.status(400).json({ error: 'Date de publication invalide.' });
+    }
+    // La date attribuée doit tomber dans la plage du calendrier, sans quoi la
+    // publication resterait introuvable dans les vues Mois et Semaine.
+    const rangeStart = new Date(existing.postPlan.startDate).setHours(0, 0, 0, 0);
+    const rangeEnd = new Date(existing.postPlan.endDate).setHours(23, 59, 59, 999);
+    if (d.getTime() < rangeStart || d.getTime() > rangeEnd) {
+      return res.status(400).json({
+        error: `La date doit être comprise entre le ${new Date(rangeStart).toLocaleDateString('fr-FR')} et le ${new Date(rangeEnd).toLocaleDateString('fr-FR')}.`,
+      });
+    }
+    data.scheduledDate = d;
+    // La publication est replacée : elle n'attend plus de date.
+    data.needsReschedule = false;
+  }
 
   const post = await prisma.post.update({ where: { id }, data });
   return res.json(post);

@@ -138,7 +138,7 @@ function assignEventDates(
   scheduleDates: Date[],
   rangeStart: Date,
   rangeEnd: Date,
-): Date[] {
+): Array<{ date: Date; needsReschedule: boolean }> {
   const startMs = new Date(rangeStart).setHours(0, 0, 0, 0);
   const endMs = new Date(rangeEnd).setHours(23, 59, 59, 999);
 
@@ -147,19 +147,31 @@ function assignEventDates(
   const fallbacks = scheduleDates.length > 0 ? scheduleDates : [new Date(startMs)];
   let fallbackCursor = 0;
 
-  return events.map((event) => {
-    if (event.eventDate) {
-      const t = event.eventDate.getTime();
-      if (!isNaN(t) && t >= startMs && t <= endMs) {
-        const d = new Date(t);
-        // Heure de publication normalisée : 10h.
-        d.setHours(10, 0, 0, 0);
-        return d;
-      }
-    }
+  const nextFallback = () => {
     const slot = fallbacks[fallbackCursor % fallbacks.length];
     fallbackCursor++;
     return new Date(slot);
+  };
+
+  return events.map((event) => {
+    if (!event.eventDate) {
+      // Aucune date à honorer : un créneau suffit, rien à signaler.
+      return { date: nextFallback(), needsReschedule: false };
+    }
+    const t = event.eventDate.getTime();
+    if (isNaN(t)) return { date: nextFallback(), needsReschedule: false };
+
+    if (t >= startMs && t <= endMs) {
+      const d = new Date(t);
+      // Heure de publication normalisée : 10h.
+      d.setHours(10, 0, 0, 0);
+      return { date: d, needsReschedule: false };
+    }
+
+    // Date réelle hors de la plage du calendrier : on place la publication sur
+    // un créneau provisoire et on la signale pour que l'utilisateur lui
+    // attribue lui-même une date.
+    return { date: nextFallback(), needsReschedule: true };
   });
 }
 
@@ -325,7 +337,7 @@ export async function generateCalendar(
   const posts: Post[] = [];
 
   for (const [index, event] of usedEvents.entries()) {
-    const date = dates[index];
+    const { date, needsReschedule } = dates[index];
 
     for (const network of input.networks) {
       // Aucun appel au LLM ici : le titre et la description ont déjà été
@@ -345,20 +357,31 @@ export async function generateCalendar(
           hashtags: [],
           relatedEventId: event.id,
           status: 'DRAFT',
+          needsReschedule,
         },
       });
       posts.push(post);
     }
   }
 
+  const messages: string[] = [];
+  const outOfRange = dates.filter((d) => d.needsReschedule).length;
+  if (outOfRange > 0) {
+    messages.push(
+      `${outOfRange} événement(s) sont datés hors de la plage du calendrier. Attribuez-leur une date depuis l'encart affiché au-dessus du calendrier.`,
+    );
+  }
   const skipped = sourceEvents.length - usedEvents.length;
+  if (skipped > 0) {
+    messages.push(
+      `${skipped} événement(s) non repris : la limite de ${MAX_POSTS} publications par calendrier est atteinte.`,
+    );
+  }
+
   return {
     postPlan,
     posts,
-    warning:
-      skipped > 0
-        ? `${skipped} événement(s) non repris : la limite de ${MAX_POSTS} publications par calendrier est atteinte.`
-        : undefined,
+    warning: messages.length > 0 ? messages.join(' ') : undefined,
   };
 }
 

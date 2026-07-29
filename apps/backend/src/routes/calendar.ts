@@ -149,6 +149,14 @@ router.post('/:postPlanId/events', validate(calendarAddEventSchema), async (req,
     scheduledDate = d;
   }
 
+  // Hors de la plage du calendrier : on replie sur son début et on signale la
+  // publication pour que l'utilisateur lui attribue une date.
+  const rangeStart = new Date(plan.startDate).setHours(0, 0, 0, 0);
+  const rangeEnd = new Date(plan.endDate).setHours(23, 59, 59, 999);
+  const needsReschedule =
+    scheduledDate.getTime() < rangeStart || scheduledDate.getTime() > rangeEnd;
+  if (needsReschedule) scheduledDate = plan.startDate;
+
   const posts = await prisma.$transaction(
     networks.map((network) =>
       prisma.post.create({
@@ -161,13 +169,20 @@ router.post('/:postPlanId/events', validate(calendarAddEventSchema), async (req,
           hashtags: [],
           relatedEventId: event.id,
           status: 'DRAFT',
+          needsReschedule,
         },
         include: { relatedEvent: true },
       }),
     ),
   );
 
-  return res.status(201).json({ posts, postPlan: plan });
+  return res.status(201).json({
+    posts,
+    postPlan: plan,
+    warning: needsReschedule
+      ? `« ${event.title} » est daté hors de la plage du calendrier. Attribuez-lui une date depuis l'encart affiché au-dessus du calendrier.`
+      : undefined,
+  });
 });
 
 /** Supprime un calendrier et toutes ses publications (cascade Prisma). */

@@ -10,6 +10,7 @@ import { ListView, MonthView, WeekView } from '../components/CalendarViews';
 import { ManualEventModal } from '../components/ManualEventModal';
 import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
+import { ReschedulePanel } from '../components/ReschedulePanel';
 import { useToast } from '../hooks/useToast';
 import { useSelection } from '../hooks/useSelection';
 import { usePreferredNetworks } from '../hooks/usePreferredNetworks';
@@ -444,6 +445,13 @@ export function CalendarPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Publications issues d'événements datés hors de la plage :
+                  l'utilisateur leur attribue une date à la main. */}
+              <ReschedulePanel
+                plan={activePlan}
+                posts={(activePlan.posts ?? []).filter((p) => p.needsReschedule)}
+              />
 
               {(activePlan.posts?.length ?? 0) === 0 ? (
                 <EmptyState title="Aucune publication dans ce calendrier. Utilisez « ➕ Publication » pour en ajouter une." />
