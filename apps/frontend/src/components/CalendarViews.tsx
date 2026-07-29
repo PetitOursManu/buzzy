@@ -10,6 +10,65 @@ function sameDay(a: Date, b: Date) {
   );
 }
 
+/** Lundi de la semaine contenant `d`. */
+export function startOfWeek(d: Date): Date {
+  const start = new Date(d);
+  start.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+/**
+ * Barre de navigation des vues Mois et Semaine : période précédente, suivante,
+ * et retour à la période d'origine du calendrier.
+ */
+export function PeriodNav({
+  label,
+  onPrev,
+  onNext,
+  onReset,
+  resetLabel,
+}: {
+  label: string;
+  onPrev: () => void;
+  onNext: () => void;
+  onReset: () => void;
+  resetLabel: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 mb-4">
+      <button
+        onClick={onPrev}
+        aria-label="Période précédente"
+        title="Période précédente"
+        className="btn-ghost !py-1.5 !px-3 text-lg leading-none"
+      >
+        ‹
+      </button>
+
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="font-display font-semibold capitalize truncate">{label}</span>
+        <button
+          onClick={onReset}
+          title={resetLabel}
+          className="btn-ghost !py-1 !px-2 text-xs whitespace-nowrap"
+        >
+          ⤺ Début
+        </button>
+      </div>
+
+      <button
+        onClick={onNext}
+        aria-label="Période suivante"
+        title="Période suivante"
+        className="btn-ghost !py-1.5 !px-3 text-lg leading-none"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
 export function PostChip({ post, onClick }: { post: PostItem; onClick: () => void }) {
   return (
     <motion.button

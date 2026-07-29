@@ -166,6 +166,16 @@ export const calendarCreateSchema = z.object({
     .default([]),
 });
 
+/** Modification d'un calendrier : nom et plage de dates. */
+export const calendarUpdateSchema = z.object({
+  name: z.string().min(1).max(160).optional(),
+  startDate: z.string().min(1).optional(),
+  endDate: z.string().min(1).optional(),
+  networks: z
+    .array(z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']))
+    .optional(),
+});
+
 /**
  * Rattache un événement existant à un calendrier : une publication est créée
  * par réseau, à partir des données de l'événement. Aucune génération IA.

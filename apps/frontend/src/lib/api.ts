@@ -203,6 +203,15 @@ export const calendarApi = {
       `/calendar/${planId}/events`,
       { method: 'POST', body: JSON.stringify(data) },
     ),
+  /** Modifie le nom, la plage de dates ou les réseaux d'un calendrier. */
+  update: (
+    id: string,
+    data: Partial<{ name: string; startDate: string; endDate: string; networks: Network[] }>,
+  ) =>
+    request<{ postPlan: PostPlan; rescheduled: number; warning?: string }>(`/calendar/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   list: () => request<PostPlan[]>('/calendar'),
   get: (id: string) => request<PostPlan>(`/calendar/${id}`),
   remove: (id: string) => request<{ ok: boolean; id: string }>(`/calendar/${id}`, { method: 'DELETE' }),

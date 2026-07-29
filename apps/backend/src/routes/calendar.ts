@@ -3,7 +3,12 @@ import { prisma } from '../lib/prisma';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
-import { calendarAddEventSchema, calendarCreateSchema, calendarGenerateSchema } from './schemas';
+import {
+  calendarAddEventSchema,
+  calendarCreateSchema,
+  calendarGenerateSchema,
+  calendarUpdateSchema,
+} from './schemas';
 import {
   CalendarInputError,
   createEmptyCalendar,
@@ -113,6 +118,76 @@ router.get('/:postPlanId', async (req, res) => {
   });
   if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
   return res.json(plan);
+});
+
+/**
+ * Modifie un calendrier : son nom, sa plage de dates, ses réseaux.
+ *
+ * Resserrer la plage peut laisser des publications en dehors : plutôt que de
+ * refuser la modification ou de les perdre, elles sont ramenées au début de la
+ * nouvelle plage et signalées, pour que l'utilisateur leur attribue une date
+ * depuis l'encart prévu à cet effet.
+ */
+router.put('/:postPlanId', validate(calendarUpdateSchema), async (req, res) => {
+  const { postPlanId } = req.params;
+  const body = req.body as {
+    name?: string;
+    startDate?: string;
+    endDate?: string;
+    networks?: string[];
+  };
+
+  const plan = await prisma.postPlan.findUnique({ where: { id: postPlanId } });
+  if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
+
+  const startDate = body.startDate ? new Date(body.startDate) : plan.startDate;
+  const endDate = body.endDate ? new Date(body.endDate) : plan.endDate;
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return res.status(400).json({ error: 'Dates invalides.' });
+  }
+  if (endDate < startDate) {
+    return res.status(400).json({ error: 'La date de fin précède la date de début.' });
+  }
+
+  const updated = await prisma.postPlan.update({
+    where: { id: postPlanId },
+    data: {
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      startDate,
+      endDate,
+      ...(body.networks !== undefined ? { networks: body.networks } : {}),
+    },
+  });
+
+  // Publications désormais hors de la nouvelle plage : ramenées à son début et
+  // signalées pour replacement manuel.
+  const rangeStart = new Date(startDate).setHours(0, 0, 0, 0);
+  const rangeEnd = new Date(endDate).setHours(23, 59, 59, 999);
+  const stranded = await prisma.post.findMany({
+    where: {
+      postPlanId,
+      OR: [
+        { scheduledDate: { lt: new Date(rangeStart) } },
+        { scheduledDate: { gt: new Date(rangeEnd) } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (stranded.length > 0) {
+    await prisma.post.updateMany({
+      where: { id: { in: stranded.map((p) => p.id) } },
+      data: { scheduledDate: startDate, needsReschedule: true },
+    });
+  }
+
+  return res.json({
+    postPlan: updated,
+    rescheduled: stranded.length,
+    warning:
+      stranded.length > 0
+        ? `${stranded.length} publication(s) se retrouvent hors de la nouvelle plage. Attribuez-leur une date depuis l'encart affiché au-dessus du calendrier.`
+        : undefined,
+  });
 });
 
 /**

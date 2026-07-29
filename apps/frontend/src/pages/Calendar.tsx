@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
@@ -6,7 +6,7 @@ import { calendarApi, postsApi, ApiError } from '../lib/api';
 import type { Network, PostItem, PostPlan } from '../lib/types';
 import { NETWORK_LABEL } from '../lib/constants';
 import { CardSkeleton, EmptyState, Field, GlassPanel, Modal, Spinner } from '../components/ui';
-import { ListView, MonthView, WeekView } from '../components/CalendarViews';
+import { ListView, MonthView, PeriodNav, WeekView, startOfWeek } from '../components/CalendarViews';
 import { ManualEventModal } from '../components/ManualEventModal';
 import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
@@ -180,10 +180,70 @@ export function CalendarPage() {
   });
 
   const activePlan = planQuery.data;
-  const anchor = useMemo(
-    () => (activePlan ? new Date(activePlan.startDate) : today),
-    [activePlan],
-  );
+
+  // ─── Navigation dans les vues Mois et Semaine ───
+  // `anchor` est la période affichée ; elle démarre au début du calendrier et
+  // se déplace ensuite librement avec les flèches.
+  const [anchor, setAnchor] = useState<Date | null>(null);
+  const planStart = activePlan ? new Date(activePlan.startDate) : today;
+  const currentAnchor = anchor ?? planStart;
+
+  // Changer de calendrier remet la navigation à son début.
+  useEffect(() => {
+    setAnchor(null);
+  }, [activePlanId]);
+
+  const shiftAnchor = (direction: -1 | 1) => {
+    const next = new Date(currentAnchor);
+    if (viewMode === 'month') {
+      next.setDate(1);
+      next.setMonth(next.getMonth() + direction);
+    } else {
+      next.setDate(next.getDate() + direction * 7);
+    }
+    setAnchor(next);
+  };
+
+  const periodLabel =
+    viewMode === 'month'
+      ? currentAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+      : (() => {
+          const start = startOfWeek(currentAnchor);
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+          return `${start.toLocaleDateString('fr-FR', opts)} – ${end.toLocaleDateString('fr-FR', opts)} ${end.getFullYear()}`;
+        })();
+
+  // ─── Modification du calendrier (nom et plage de dates) ───
+  const [editOpen, setEditOpen] = useState(false);
+  const [eName, setEName] = useState('');
+  const [eStart, setEStart] = useState('');
+  const [eEnd, setEEnd] = useState('');
+
+  const openEdit = (plan: PostPlan) => {
+    setEName(plan.name);
+    setEStart(iso(new Date(plan.startDate)));
+    setEEnd(iso(new Date(plan.endDate)));
+    setEditOpen(true);
+  };
+
+  const updatePlan = useMutation({
+    mutationFn: () =>
+      calendarApi.update(activePlanId!, {
+        name: eName.trim(),
+        startDate: eStart,
+        endDate: eEnd,
+      }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      setAnchor(null); // la navigation repart du nouveau début
+      toast('Calendrier mis à jour.', 'success');
+      if (res.warning) toast(res.warning, 'info');
+      setEditOpen(false);
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Modification impossible.', 'error'),
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -374,10 +434,19 @@ export function CalendarPage() {
               <div className="glass-strong rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-display font-semibold">{activePlan.name}</h2>
-                  <p className="text-xs text-muted">
-                    {new Date(activePlan.startDate).toLocaleDateString('fr-FR')} –{' '}
-                    {new Date(activePlan.endDate).toLocaleDateString('fr-FR')} ·{' '}
-                    {activePlan.posts?.length ?? 0} publication(s)
+                  <p className="text-xs text-muted flex flex-wrap items-center gap-1.5">
+                    <span>
+                      {new Date(activePlan.startDate).toLocaleDateString('fr-FR')} –{' '}
+                      {new Date(activePlan.endDate).toLocaleDateString('fr-FR')} ·{' '}
+                      {activePlan.posts?.length ?? 0} publication(s)
+                    </span>
+                    <button
+                      onClick={() => openEdit(activePlan)}
+                      className="hover:underline text-[color:var(--grape)]"
+                      title="Modifier le nom et les dates du calendrier"
+                    >
+                      ✏️ Modifier les dates
+                    </button>
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -469,11 +538,20 @@ export function CalendarPage() {
                       }}
                     />
                   )}
+                  {viewMode !== 'list' && (
+                    <PeriodNav
+                      label={periodLabel}
+                      onPrev={() => shiftAnchor(-1)}
+                      onNext={() => shiftAnchor(1)}
+                      onReset={() => setAnchor(null)}
+                      resetLabel={`Revenir au début du calendrier (${new Date(activePlan.startDate).toLocaleDateString('fr-FR')})`}
+                    />
+                  )}
                   {viewMode === 'month' && (
-                    <MonthView posts={activePlan.posts!} anchor={anchor} onSelect={setSelectedPost} />
+                    <MonthView posts={activePlan.posts!} anchor={currentAnchor} onSelect={setSelectedPost} />
                   )}
                   {viewMode === 'week' && (
-                    <WeekView posts={activePlan.posts!} anchor={anchor} onSelect={setSelectedPost} />
+                    <WeekView posts={activePlan.posts!} anchor={currentAnchor} onSelect={setSelectedPost} />
                   )}
                 </GlassPanel>
               )}
@@ -483,6 +561,43 @@ export function CalendarPage() {
       )}
 
       <PostModal post={selectedPost} planId={activePlanId ?? ''} onClose={() => setSelectedPost(null)} />
+
+      {/* ─── Modale : modification du calendrier ─── */}
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Modifier le calendrier">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-secondary">
+            Choisissez la période couverte par ce calendrier. Les publications qui se retrouveraient
+            hors de la nouvelle plage sont conservées et signalées, pour que vous leur attribuiez
+            une date.
+          </p>
+          <Field label="Nom du calendrier">
+            <input className="glass-input" value={eName} onChange={(e) => setEName(e.target.value)} />
+          </Field>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Début">
+              <input type="date" className="glass-input" value={eStart} onChange={(e) => setEStart(e.target.value)} />
+            </Field>
+            <Field label="Fin">
+              <input type="date" className="glass-input" value={eEnd} onChange={(e) => setEEnd(e.target.value)} />
+            </Field>
+          </div>
+          {eStart && eEnd && eEnd < eStart && (
+            <p className="text-xs text-amber-500">La date de fin précède la date de début.</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost text-sm" onClick={() => setEditOpen(false)}>
+              Annuler
+            </button>
+            <button
+              className="btn-primary text-sm flex items-center gap-2"
+              onClick={() => updatePlan.mutate()}
+              disabled={updatePlan.isPending || !eName.trim() || !eStart || !eEnd || eEnd < eStart}
+            >
+              {updatePlan.isPending ? <Spinner /> : '💾'} Enregistrer
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ─── Modale : ajout manuel d'une publication ─── */}
       <Modal open={postOpen} onClose={() => setPostOpen(false)} title="Ajouter une publication">
