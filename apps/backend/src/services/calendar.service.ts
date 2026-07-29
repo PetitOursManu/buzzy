@@ -13,7 +13,7 @@ import {
 import type { Event as PrismaEvent, Post, PostPlan, UserProfile } from '@prisma/client';
 
 /** Description déjà générée pour un réseau au niveau de l'événement, si disponible. */
-function preGeneratedDescription(event: PrismaEvent | null, network: string): string | null {
+export function preGeneratedDescription(event: PrismaEvent | null, network: string): string | null {
   if (!event) return null;
   const nd = event.networkDescriptions as Record<string, unknown> | null;
   if (!nd || typeof nd !== 'object') return null;

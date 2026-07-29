@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
-import { calendarApi, eventsApi, postsApi, ApiError } from '../lib/api';
-import type { EventScope, Network, PostItem, PostPlan } from '../lib/types';
-import { NETWORKS, THEMES, SCOPES } from '../lib/constants';
+import { calendarApi, postsApi, ApiError } from '../lib/api';
+import type { Network, PostItem, PostPlan } from '../lib/types';
+import { NETWORKS } from '../lib/constants';
 import { CardSkeleton, EmptyState, Field, GlassPanel, Modal, Spinner } from '../components/ui';
 import { ListView, MonthView, WeekView } from '../components/CalendarViews';
+import { ManualEventModal } from '../components/ManualEventModal';
 import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
 import { useToast } from '../hooks/useToast';
@@ -23,34 +24,8 @@ export function CalendarPage() {
   const { selectedIds, clear, toggle } = useSelection();
   const queryClient = useQueryClient();
 
-  // Ajout manuel d'un événement.
+  // Ajout manuel d'un événement (formulaire partagé avec la page principale).
   const [manualOpen, setManualOpen] = useState(false);
-  const [mTitle, setMTitle] = useState('');
-  const [mDescription, setMDescription] = useState('');
-  const [mDate, setMDate] = useState(iso(today));
-  const [mScope, setMScope] = useState<EventScope>('NATIONAL');
-  const [mTheme, setMTheme] = useState<string>('Autre');
-
-  const createManual = useMutation({
-    mutationFn: () =>
-      eventsApi.createManual({
-        title: mTitle.trim(),
-        description: mDescription.trim(),
-        eventDate: mDate || null,
-        scope: mScope,
-        theme: mTheme,
-      }),
-    onSuccess: (ev) => {
-      toggle(ev.id); // ajoute à la sélection pour le calendrier
-      setEventSource('selected');
-      queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
-      toast('Événement ajouté et sélectionné.', 'success');
-      setManualOpen(false);
-      setMTitle('');
-      setMDescription('');
-    },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Ajout impossible.', 'error'),
-  });
 
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState(iso(today));
@@ -517,65 +492,17 @@ export function CalendarPage() {
         </div>
       </Modal>
 
-      {/* ─── Modale : ajout manuel d'un événement ─── */}
-      <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Ajouter un événement">
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-secondary">
-            Créez un événement que vous connaissez déjà. Il est ajouté à votre sélection pour la génération du calendrier.
-          </p>
-          <Field label="Date de l'événement">
-            <input type="date" className="glass-input" value={mDate} onChange={(e) => setMDate(e.target.value)} />
-          </Field>
-          <Field label="Titre">
-            <input
-              className="glass-input"
-              value={mTitle}
-              onChange={(e) => setMTitle(e.target.value)}
-              placeholder="ex : Inauguration de notre nouveau local"
-            />
-          </Field>
-          <Field label="Description">
-            <textarea
-              className="glass-input min-h-[110px] resize-y"
-              value={mDescription}
-              onChange={(e) => setMDescription(e.target.value)}
-              placeholder="Décrivez l'événement…"
-            />
-          </Field>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <Field label="Portée">
-              <select className="glass-input" value={mScope} onChange={(e) => setMScope(e.target.value as EventScope)}>
-                {SCOPES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Thème">
-              <select className="glass-input" value={mTheme} onChange={(e) => setMTheme(e.target.value)}>
-                {THEMES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button className="btn-ghost text-sm" onClick={() => setManualOpen(false)}>
-              Annuler
-            </button>
-            <button
-              className="btn-primary text-sm flex items-center gap-2"
-              onClick={() => createManual.mutate()}
-              disabled={createManual.isPending || !mTitle.trim() || !mDescription.trim()}
-            >
-              {createManual.isPending ? <Spinner /> : '➕'} Ajouter l'événement
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {/* ─── Modale : ajout manuel d'un événement (formulaire partagé) ─── */}
+      <ManualEventModal
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onCreated={(ev) => {
+          // Sur cette page, l'événement créé rejoint la sélection servant à la
+          // génération du calendrier.
+          toggle(ev.id);
+          setEventSource('selected');
+        }}
+      />
     </div>
   );
 }

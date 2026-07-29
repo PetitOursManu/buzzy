@@ -3,8 +3,12 @@ import { prisma } from '../lib/prisma';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
-import { calendarCreateSchema, calendarGenerateSchema } from './schemas';
-import { createEmptyCalendar, generateCalendar } from '../services/calendar.service';
+import { calendarAddEventSchema, calendarCreateSchema, calendarGenerateSchema } from './schemas';
+import {
+  createEmptyCalendar,
+  generateCalendar,
+  preGeneratedDescription,
+} from '../services/calendar.service';
 import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 import { toCsv } from '../lib/csv';
 
@@ -110,6 +114,61 @@ router.get('/:postPlanId', async (req, res) => {
   });
   if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
   return res.json(plan);
+});
+
+/**
+ * Rattache un événement existant à un calendrier : crée une publication par
+ * réseau à partir des données de l'événement. Aucun appel à l'IA — le titre et
+ * la description de l'événement sont repris tels quels.
+ */
+router.post('/:postPlanId/events', validate(calendarAddEventSchema), async (req, res) => {
+  const { postPlanId } = req.params;
+  const body = req.body as { eventId: string; networks: string[]; scheduledDate?: string };
+
+  const plan = await prisma.postPlan.findUnique({ where: { id: postPlanId } });
+  if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
+
+  const event = await prisma.event.findUnique({ where: { id: body.eventId } });
+  if (!event) return res.status(404).json({ error: 'Événement introuvable.' });
+
+  // À défaut de réseaux explicites, on reprend ceux configurés sur le calendrier.
+  const networks = body.networks.length > 0 ? body.networks : plan.networks;
+  if (networks.length === 0) {
+    return res.status(400).json({
+      error: "Aucun réseau ciblé : ce calendrier n'en définit aucun, précisez-en au moins un.",
+    });
+  }
+
+  // Date de publication : celle demandée, sinon celle de l'événement, sinon le
+  // début du calendrier.
+  let scheduledDate = event.eventDate ?? plan.startDate;
+  if (body.scheduledDate) {
+    const d = new Date(body.scheduledDate);
+    if (isNaN(d.getTime())) {
+      return res.status(400).json({ error: 'Date de publication invalide.' });
+    }
+    scheduledDate = d;
+  }
+
+  const posts = await prisma.$transaction(
+    networks.map((network) =>
+      prisma.post.create({
+        data: {
+          postPlanId,
+          scheduledDate,
+          network,
+          title: event.title.slice(0, 300),
+          content: preGeneratedDescription(event, network) ?? event.description,
+          hashtags: [],
+          relatedEventId: event.id,
+          status: 'DRAFT',
+        },
+        include: { relatedEvent: true },
+      }),
+    ),
+  );
+
+  return res.status(201).json({ posts, postPlan: plan });
 });
 
 /** Supprime un calendrier et toutes ses publications (cascade Prisma). */

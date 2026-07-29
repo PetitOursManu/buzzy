@@ -166,6 +166,20 @@ export const calendarCreateSchema = z.object({
     .default([]),
 });
 
+/**
+ * Rattache un événement existant à un calendrier : une publication est créée
+ * par réseau, à partir des données de l'événement. Aucune génération IA.
+ */
+export const calendarAddEventSchema = z.object({
+  eventId: z.string().min(1),
+  // Vide = on reprend les réseaux configurés sur le calendrier.
+  networks: z
+    .array(z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']))
+    .default([]),
+  // Vide = date de l'événement, sinon date de début du calendrier.
+  scheduledDate: z.string().optional(),
+});
+
 export const postUpdateSchema = z.object({
   title: z.string().max(300).optional(),
   content: z.string().max(8000).optional(),

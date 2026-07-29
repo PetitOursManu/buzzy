@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { eventsApi, ApiError } from '../lib/api';
-import type { DateTarget, EventItem, EventScope } from '../lib/types';
+import { calendarApi, eventsApi, ApiError } from '../lib/api';
+import type { DateTarget, EventItem, EventScope, PostPlan } from '../lib/types';
 import { SCOPES, THEMES } from '../lib/constants';
 import { EventCard } from '../components/EventCard';
+import { ManualEventModal } from '../components/ManualEventModal';
 import {
   CardSkeleton,
   EmptyState,
@@ -261,16 +262,50 @@ export function DiscoveryPage() {
   const updateNewEvent = (u: EventItem) => setEvents((prev) => prev.map((e) => (e.id === u.id ? u : e)));
   const invalidateHistory = () => queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
 
+  // ─── Ajout manuel d'un événement (avec rattachement optionnel à un calendrier) ───
+  const [manualOpen, setManualOpen] = useState(false);
+
+  // ─── Calendriers existants : accès et suppression depuis la page principale ───
+  const plansQuery = useQuery({ queryKey: ['calendar', 'list'], queryFn: calendarApi.list });
+  const deletePlan = useMutation({
+    mutationFn: (id: string) => calendarApi.remove(id),
+    onSuccess: () => {
+      toast('Calendrier supprimé.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['calendar'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
+
   const hasSort = events.length > 0 || historyEvents.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-display font-bold">Découverte d'événements</h1>
-        <p className="text-secondary mt-1">
-          Explorez des événements mondiaux, nationaux, régionaux et locaux par thème, générés par votre IA.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-display font-bold">Découverte d'événements</h1>
+          <p className="text-secondary mt-1">
+            Explorez des événements mondiaux, nationaux, régionaux et locaux par thème, générés par votre IA.
+          </p>
+        </div>
+        <button
+          className="btn-primary flex items-center gap-2 text-sm"
+          onClick={() => setManualOpen(true)}
+          title="Ajoute un événement que vous connaissez déjà, sans passer par l'IA"
+        >
+          ➕ Ajouter un événement manuellement
+        </button>
       </div>
+
+      {/* ─── Calendriers existants ─── */}
+      <CalendarBar
+        plans={plansQuery.data ?? []}
+        deletingId={deletePlan.isPending ? (deletePlan.variables as string) : null}
+        onDelete={(p) => {
+          if (confirm(`Supprimer définitivement le calendrier « ${p.name} » et ses publications ?`)) {
+            deletePlan.mutate(p.id);
+          }
+        }}
+      />
 
       {/* ─── Filtres ─── */}
       <GlassPanel className="flex flex-col gap-5">
@@ -603,6 +638,9 @@ export function DiscoveryPage() {
         </>
       )}
 
+      {/* ─── Modale : ajout manuel d'un événement ─── */}
+      <ManualEventModal open={manualOpen} onClose={() => setManualOpen(false)} />
+
       {/* ─── Modale de validation du plan ─── */}
       <Modal open={!!planText} onClose={() => setPlanText(null)} title="Plan proposé par l'IA">
         <div className="flex flex-col gap-4">
@@ -625,6 +663,46 @@ export function DiscoveryPage() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Rappel compact des calendriers existants sur la page principale : accès
+ * direct et suppression, sans avoir à passer par la page « Calendrier ».
+ */
+function CalendarBar({
+  plans,
+  onDelete,
+  deletingId,
+}: {
+  plans: PostPlan[];
+  onDelete: (plan: PostPlan) => void;
+  deletingId: string | null;
+}) {
+  if (plans.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-muted flex items-center gap-1.5">
+        <span aria-hidden>🗓️</span> Mes calendriers :
+      </span>
+      {plans.map((p) => (
+        <div key={p.id} className="glass rounded-xl flex items-center">
+          <Link to="/calendrier" className="py-1.5 pl-3 pr-1.5 text-sm hover:underline">
+            {p.name} <span className="opacity-60 text-xs">({p._count?.posts ?? 0})</span>
+          </Link>
+          <button
+            onClick={() => onDelete(p)}
+            disabled={deletingId === p.id}
+            aria-label={`Supprimer le calendrier « ${p.name} »`}
+            title="Supprimer ce calendrier"
+            className="h-7 w-7 mr-1.5 rounded-lg flex items-center justify-center text-xs
+                       opacity-50 hover:opacity-100 hover:bg-red-500/20 transition-opacity disabled:opacity-30"
+          >
+            {deletingId === p.id ? '…' : '🗑️'}
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
