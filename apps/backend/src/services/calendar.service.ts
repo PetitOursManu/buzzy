@@ -96,7 +96,10 @@ export function computeScheduleDates(
 
 /** Récupère ou sélectionne les événements source du calendrier. */
 async function resolveSourceEvents(input: CalendarGenerationInput): Promise<PrismaEvent[]> {
-  if (input.eventSource === 'selected' && input.selectedEventIds.length > 0) {
+  if (input.eventSource === 'selected') {
+    // Sélection explicite : on s'y tient strictement. Une sélection vide donne
+    // un calendrier vide — jamais un repli sur des événements arbitraires.
+    if (input.selectedEventIds.length === 0) return [];
     return prisma.event.findMany({ where: { id: { in: input.selectedEventIds } } });
   }
   // Mode "IA choisit" : on pioche parmi les événements persistés correspondant aux filtres.
@@ -174,14 +177,49 @@ async function generateOnePost(
 export interface CalendarGenerationResult {
   postPlan: PostPlan;
   posts: Post[];
+  /** Message informatif quand le calendrier est créé sans publication. */
+  warning?: string;
+}
+
+/** Crée l'enregistrement du calendrier, sans aucune publication. */
+async function createPlanRecord(input: {
+  name?: string;
+  startDate: Date;
+  endDate: Date;
+  frequency: Frequency;
+  networks: string[];
+}): Promise<PostPlan> {
+  return prisma.postPlan.create({
+    data: {
+      name: input.name?.trim() || `Calendrier ${new Date().toLocaleDateString('fr-FR')}`,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      frequency: input.frequency as unknown as object,
+      networks: input.networks,
+    },
+  });
+}
+
+/**
+ * Crée un calendrier vide : aucune publication, aucun appel à l'IA.
+ * Les publications sont ensuite ajoutées à la main par l'utilisateur.
+ */
+export async function createEmptyCalendar(input: {
+  name?: string;
+  startDate: Date;
+  endDate: Date;
+  frequency?: Frequency;
+  networks: string[];
+}): Promise<PostPlan> {
+  return createPlanRecord({
+    ...input,
+    frequency: input.frequency ?? { type: 'week', count: 1 },
+  });
 }
 
 export async function generateCalendar(
   input: CalendarGenerationInput,
 ): Promise<CalendarGenerationResult> {
-  const config = await getActiveAiConfig();
-  const profile = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
-
   const sourceEvents = await resolveSourceEvents(input);
   const scheduleDates = computeScheduleDates(input.startDate, input.endDate, input.frequency);
 
@@ -192,6 +230,30 @@ export async function generateCalendar(
     throw new AiRequestError('Sélectionnez au moins un réseau social.');
   }
 
+  // Aucun événement source : on crée le calendrier vide plutôt que d'inventer
+  // des publications sans fondement. Aucun appel à l'IA n'est effectué, la
+  // configuration IA n'est donc même pas requise.
+  if (sourceEvents.length === 0) {
+    const emptyPlan = await createPlanRecord({
+      name: input.name,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      frequency: input.frequency,
+      networks: input.networks,
+    });
+    return {
+      postPlan: emptyPlan,
+      posts: [],
+      warning:
+        input.eventSource === 'selected'
+          ? 'Calendrier créé vide : aucun événement sélectionné. Ajoutez des publications manuellement ou sélectionnez des événements dans « Découverte ».'
+          : 'Calendrier créé vide : aucun événement enregistré ne correspond aux filtres. Lancez une découverte, puis relancez la génération.',
+    };
+  }
+
+  const config = await getActiveAiConfig();
+  const profile = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
+
   // Garde-fou : limite le nombre total de publications générées (coût/temps).
   const MAX_POSTS = 120;
   const plannedTotal = scheduleDates.length * input.networks.length;
@@ -201,14 +263,12 @@ export async function generateCalendar(
       : scheduleDates.length;
   const usedDates = scheduleDates.slice(0, dateLimit);
 
-  const postPlan = await prisma.postPlan.create({
-    data: {
-      name: input.name?.trim() || `Calendrier ${new Date().toLocaleDateString('fr-FR')}`,
-      startDate: input.startDate,
-      endDate: input.endDate,
-      frequency: input.frequency as unknown as object,
-      networks: input.networks,
-    },
+  const postPlan = await createPlanRecord({
+    name: input.name,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    frequency: input.frequency,
+    networks: input.networks,
   });
 
   const posts: Post[] = [];
@@ -216,7 +276,7 @@ export async function generateCalendar(
 
   for (const date of usedDates) {
     // Un événement source tourne (round-robin) sur les dates.
-    const event = sourceEvents.length > 0 ? sourceEvents[eventCursor % sourceEvents.length] : null;
+    const event = sourceEvents[eventCursor % sourceEvents.length];
     eventCursor++;
 
     for (const network of input.networks) {
@@ -226,27 +286,25 @@ export async function generateCalendar(
       // l'événement (identique à ce qui est affiché sur la carte de découverte).
       const preGenerated = preGeneratedDescription(event, network);
       if (preGenerated) {
-        generated = { title: event!.title, content: preGenerated, hashtags: [] };
+        generated = { title: event.title, content: preGenerated, hashtags: [] };
       } else {
         const ctx: PostGenContext = {
           network,
           scheduledDate: date,
-          event: event
-            ? {
-                title: event.title,
-                description: event.description,
-                eventDate: event.eventDate,
-                eventPeriod: event.eventPeriod,
-                theme: event.theme,
-              }
-            : null,
+          event: {
+            title: event.title,
+            description: event.description,
+            eventDate: event.eventDate,
+            eventPeriod: event.eventPeriod,
+            theme: event.theme,
+          },
         };
         try {
           generated = await generateOnePost(config, profile, ctx);
         } catch (e) {
           // On persiste un brouillon d'erreur plutôt que d'échouer tout le calendrier.
           generated = {
-            title: event?.title ?? 'Publication',
+            title: event.title,
             content: `⚠️ Génération échouée : ${(e as Error).message}. Vous pouvez régénérer ce post.`,
             hashtags: [],
           };
@@ -261,7 +319,7 @@ export async function generateCalendar(
           title: generated.title.slice(0, 300),
           content: generated.content,
           hashtags: generated.hashtags,
-          relatedEventId: event?.id ?? null,
+          relatedEventId: event.id,
           status: 'DRAFT',
         },
       });
@@ -296,6 +354,9 @@ export async function regeneratePost(postId: string): Promise<Post> {
           theme: post.relatedEvent.theme,
         }
       : null,
+    // Publication ajoutée à la main : on reformule son texte au lieu
+    // d'inventer un événement de toutes pièces.
+    baseContent: post.relatedEvent ? null : { title: post.title, content: post.content },
   };
 
   const generated = await generateOnePost(config, profile, ctx);

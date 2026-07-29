@@ -148,9 +148,38 @@ export const calendarGenerateSchema = z.object({
     .optional(),
 });
 
+/** Création d'un calendrier vide : aucune génération IA n'est déclenchée. */
+export const calendarCreateSchema = z.object({
+  name: z.string().max(160).optional(),
+  startDate: z.string().min(1),
+  endDate: z.string().min(1),
+  frequency: z
+    .object({
+      type: z.enum(['day', 'week', 'month']),
+      count: z.number().int().min(1).max(50),
+    })
+    .optional(),
+  // Un calendrier vide peut n'avoir aucun réseau ciblé : ils seront choisis
+  // publication par publication.
+  networks: z
+    .array(z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']))
+    .default([]),
+});
+
 export const postUpdateSchema = z.object({
   title: z.string().max(300).optional(),
   content: z.string().max(8000).optional(),
   hashtags: z.array(z.string().max(80)).max(30).optional(),
   status: z.enum(['DRAFT', 'APPROVED', 'PUBLISHED']).optional(),
+});
+
+/** Ajout manuel d'une publication dans un calendrier existant (sans IA). */
+export const postCreateSchema = z.object({
+  postPlanId: z.string().min(1),
+  scheduledDate: z.string().min(1),
+  network: z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']),
+  title: z.string().min(1, 'Le titre est obligatoire.').max(300),
+  content: z.string().max(8000).default(''),
+  hashtags: z.array(z.string().max(80)).max(30).default([]),
+  relatedEventId: z.string().nullable().optional(),
 });

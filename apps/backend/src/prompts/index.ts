@@ -311,6 +311,11 @@ export interface PostGenContext {
     eventPeriod?: string | null;
     theme: string;
   } | null;
+  /**
+   * Texte existant à reformuler quand aucun événement n'est rattaché.
+   * Sert de garde-fou : sans événement ET sans texte de base, on n'invente rien.
+   */
+  baseContent?: { title: string; content: string } | null;
 }
 
 export function postGenerationUserPrompt(ctx: PostGenContext): string {
@@ -337,8 +342,21 @@ export function postGenerationUserPrompt(ctx: PostGenContext): string {
     } else if (ctx.event.eventPeriod) {
       lines.push(`- Période : ${ctx.event.eventPeriod}`);
     }
+  } else if (ctx.baseContent) {
+    lines.push(
+      '',
+      "Aucun événement n'est rattaché à cette publication : tu dois REFORMULER le texte",
+      `existant ci-dessous pour ${ctx.network.toUpperCase()}, sans inventer d'événement,`,
+      "de date, de lieu, de chiffre ni de partenaire qui n'y figure pas.",
+      `- Titre actuel : ${ctx.baseContent.title}`,
+      `- Texte actuel : ${ctx.baseContent.content || '(vide)'}`,
+    );
   } else {
-    lines.push('', 'Aucun événement spécifique : propose un contenu pertinent lié à l\'actualité générale du profil.');
+    lines.push(
+      '',
+      "Aucun événement et aucun texte de base : n'invente rien. Réponds avec un",
+      'contenu vide et un titre neutre.',
+    );
   }
   return lines.join('\n');
 }

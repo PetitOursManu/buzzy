@@ -28,7 +28,17 @@ export function PostChip({ post, onClick }: { post: PostItem; onClick: () => voi
 }
 
 /* ─── Vue Liste ────────────────────────────────────────────────── */
-export function ListView({ posts, onSelect }: { posts: PostItem[]; onSelect: (p: PostItem) => void }) {
+export function ListView({
+  posts,
+  onSelect,
+  onDelete,
+  deletingId,
+}: {
+  posts: PostItem[];
+  onSelect: (p: PostItem) => void;
+  onDelete?: (p: PostItem) => void;
+  deletingId?: string | null;
+}) {
   const grouped = posts.reduce<Record<string, PostItem[]>>((acc, p) => {
     const key = new Date(p.scheduledDate).toISOString().slice(0, 10);
     (acc[key] ??= []).push(p);
@@ -49,24 +59,41 @@ export function ListView({ posts, onSelect }: { posts: PostItem[]; onSelect: (p:
           </h3>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {grouped[day].map((p) => (
-              <motion.button
+              <motion.div
                 key={p.id}
                 layout
                 whileHover={{ y: -3 }}
-                onClick={() => onSelect(p)}
-                className="glass rounded-xl p-3 text-left flex flex-col gap-1.5 hover:shadow-glow-grape transition-shadow"
+                className="glass rounded-xl relative group hover:shadow-glow-grape transition-shadow"
               >
-                <span className="flex items-center gap-1.5 text-xs text-muted">
-                  {NETWORK_EMOJI[p.network]} {NETWORK_LABEL[p.network]}
-                </span>
-                <span className="font-medium text-sm">{p.title}</span>
-                <span className="text-xs text-secondary line-clamp-2">{p.content}</span>
-                {p.hashtags.length > 0 && (
-                  <span className="text-xs text-[color:var(--grape)] truncate">
-                    {p.hashtags.map((h) => `#${h}`).join(' ')}
+                <button
+                  onClick={() => onSelect(p)}
+                  className="p-3 text-left flex flex-col gap-1.5 w-full"
+                >
+                  <span className="flex items-center gap-1.5 text-xs text-muted">
+                    {NETWORK_EMOJI[p.network]} {NETWORK_LABEL[p.network]}
                   </span>
+                  <span className="font-medium text-sm pr-6">{p.title}</span>
+                  <span className="text-xs text-secondary line-clamp-2">{p.content}</span>
+                  {p.hashtags.length > 0 && (
+                    <span className="text-xs text-[color:var(--grape)] truncate">
+                      {p.hashtags.map((h) => `#${h}`).join(' ')}
+                    </span>
+                  )}
+                </button>
+                {onDelete && (
+                  <button
+                    onClick={() => onDelete(p)}
+                    disabled={deletingId === p.id}
+                    aria-label={`Supprimer la publication « ${p.title} »`}
+                    title="Supprimer cette publication"
+                    className="absolute top-2 right-2 h-7 w-7 rounded-lg flex items-center justify-center text-sm
+                               opacity-0 group-hover:opacity-100 focus-visible:opacity-100
+                               hover:bg-red-500/15 text-red-500 transition-opacity disabled:opacity-50"
+                  >
+                    {deletingId === p.id ? '…' : '🗑️'}
+                  </button>
                 )}
-              </motion.button>
+              </motion.div>
             ))}
           </div>
         </div>

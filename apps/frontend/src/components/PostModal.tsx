@@ -46,6 +46,17 @@ export function PostModal({
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Erreur d\'enregistrement.', 'error'),
   });
 
+  const remove = useMutation({
+    mutationFn: () => postsApi.remove(post!.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendar', planId] });
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      toast('Publication supprimée.', 'success');
+      onClose();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
+
   const regenerate = useMutation({
     mutationFn: () => postsApi.regenerate(post!.id),
     onSuccess: (updated) => {
@@ -135,7 +146,20 @@ export function PostModal({
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 justify-end border-t border-[color:var(--glass-border)] pt-4">
+        <div className="flex flex-wrap gap-2 items-center border-t border-[color:var(--glass-border)] pt-4">
+          <button
+            className="btn-ghost text-sm flex items-center gap-2 !text-red-500 hover:!bg-red-500/10"
+            onClick={() => {
+              if (confirm('Supprimer définitivement cette publication du calendrier ?')) {
+                remove.mutate();
+              }
+            }}
+            disabled={remove.isPending}
+            title="Retire cette publication du calendrier"
+          >
+            {remove.isPending ? <Spinner /> : '🗑️'} Supprimer
+          </button>
+          <div className="flex-1" />
           <button className="btn-ghost text-sm" onClick={copyText}>
             📋 Copier
           </button>

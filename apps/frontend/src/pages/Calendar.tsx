@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
-import { calendarApi, eventsApi, ApiError } from '../lib/api';
+import { calendarApi, eventsApi, postsApi, ApiError } from '../lib/api';
 import type { EventScope, Network, PostItem, PostPlan } from '../lib/types';
 import { NETWORKS, THEMES, SCOPES } from '../lib/constants';
 import { CardSkeleton, EmptyState, Field, GlassPanel, Modal, Spinner } from '../components/ui';
@@ -88,12 +88,101 @@ export function CalendarPage() {
         selectedEventIds: eventSource === 'selected' ? selectedIds : [],
       }),
     onSuccess: (data) => {
-      toast(`Calendrier généré : ${data.posts.length} publication(s).`, 'success');
+      if (data.warning) {
+        toast(data.warning, 'info');
+      } else {
+        toast(`Calendrier généré : ${data.posts.length} publication(s).`, 'success');
+      }
       queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
       setActivePlanId(data.postPlan.id);
       setViewMode('list');
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Erreur de génération.', 'error'),
+  });
+
+  /** Crée un calendrier vide : aucune publication n'est générée. */
+  const createEmpty = useMutation({
+    mutationFn: () =>
+      calendarApi.createEmpty({
+        name: name.trim() || undefined,
+        startDate,
+        endDate,
+        frequency: { type: freqType, count: freqCount },
+        networks,
+      }),
+    onSuccess: (plan) => {
+      toast('Calendrier vide créé. Ajoutez-y vos publications à la main.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      setActivePlanId(plan.id);
+      setViewMode('list');
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Création impossible.', 'error'),
+  });
+
+  const deletePlan = useMutation({
+    mutationFn: (id: string) => calendarApi.remove(id),
+    onSuccess: (_res, id) => {
+      toast('Calendrier supprimé.', 'success');
+      if (activePlanId === id) setActivePlanId(null);
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
+
+  const clearPosts = useMutation({
+    mutationFn: (id: string) => calendarApi.clearPosts(id),
+    onSuccess: (res, id) => {
+      toast(`${res.deleted} publication(s) supprimée(s).`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['calendar', id] });
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
+
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const deletePost = useMutation({
+    mutationFn: (id: string) => postsApi.remove(id),
+    onMutate: (id: string) => setDeletingPostId(id),
+    onSuccess: () => {
+      toast('Publication supprimée.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['calendar', activePlanId] });
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+    onSettled: () => setDeletingPostId(null),
+  });
+
+  // Ajout manuel d'une publication dans le calendrier actif.
+  const [postOpen, setPostOpen] = useState(false);
+  const [pDate, setPDate] = useState(iso(today));
+  const [pNetwork, setPNetwork] = useState<Network>('instagram');
+  const [pTitle, setPTitle] = useState('');
+  const [pContent, setPContent] = useState('');
+  const [pHashtags, setPHashtags] = useState('');
+
+  const createPost = useMutation({
+    mutationFn: () =>
+      postsApi.create({
+        postPlanId: activePlanId!,
+        scheduledDate: new Date(`${pDate}T10:00:00`).toISOString(),
+        network: pNetwork,
+        title: pTitle.trim(),
+        content: pContent,
+        hashtags: pHashtags
+          .split(/[\s,]+/)
+          .map((h) => h.replace(/^#/, '').trim())
+          .filter(Boolean),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendar', activePlanId] });
+      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      toast('Publication ajoutée.', 'success');
+      setPostOpen(false);
+      setPTitle('');
+      setPContent('');
+      setPHashtags('');
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Ajout impossible.', 'error'),
   });
 
   const activePlan = planQuery.data;
@@ -200,16 +289,29 @@ export function CalendarPage() {
           )}
         </Field>
 
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
           <button
             className="btn-primary flex items-center gap-2"
             onClick={() => generate.mutate()}
-            disabled={generate.isPending || networks.length === 0}
+            disabled={generate.isPending || createEmpty.isPending || networks.length === 0}
           >
             {generate.isPending ? <Spinner /> : <span aria-hidden>✨</span>}
             Générer le calendrier
           </button>
+          <button
+            className="btn-ghost flex items-center gap-2"
+            onClick={() => createEmpty.mutate()}
+            disabled={generate.isPending || createEmpty.isPending}
+            title="Crée un calendrier sans aucune publication : rien n'est généré par l'IA"
+          >
+            {createEmpty.isPending ? <Spinner /> : <span aria-hidden>📄</span>}
+            Créer un calendrier vide
+          </button>
         </div>
+        <p className="text-xs text-muted -mt-2">
+          Un calendrier vide est créé tel quel : aucune publication et aucun événement ne sont
+          générés. Vous y ajoutez ensuite vos publications à la main.
+        </p>
       </GlassPanel>
 
       {generate.isPending && (
@@ -226,6 +328,12 @@ export function CalendarPage() {
         loading={plansQuery.isLoading}
         activePlanId={activePlanId}
         onSelect={setActivePlanId}
+        onDelete={(p) => {
+          if (confirm(`Supprimer définitivement le calendrier « ${p.name} » et ses publications ?`)) {
+            deletePlan.mutate(p.id);
+          }
+        }}
+        deletingId={deletePlan.isPending ? (deletePlan.variables as string) : null}
       />
 
       {/* ─── Vue du calendrier actif ─── */}
@@ -266,21 +374,70 @@ export function CalendarPage() {
                       </button>
                     ))}
                   </div>
+                  <button
+                    className="btn-ghost !py-1.5 !px-3 text-sm"
+                    onClick={() => {
+                      setPDate(iso(new Date(activePlan.startDate)));
+                      setPNetwork(activePlan.networks[0] ?? 'instagram');
+                      setPostOpen(true);
+                    }}
+                  >
+                    ➕ Publication
+                  </button>
                   <a href={calendarApi.exportUrl(activePlan.id, 'json')} className="btn-ghost !py-1.5 !px-3 text-sm">
                     ⬇ JSON
                   </a>
                   <a href={calendarApi.exportUrl(activePlan.id, 'csv')} className="btn-ghost !py-1.5 !px-3 text-sm">
                     ⬇ CSV
                   </a>
+                  {(activePlan.posts?.length ?? 0) > 0 && (
+                    <button
+                      className="btn-ghost !py-1.5 !px-3 text-sm !text-red-500 hover:!bg-red-500/10"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Supprimer les ${activePlan.posts!.length} publication(s) de « ${activePlan.name} » ? Le calendrier est conservé, vide.`,
+                          )
+                        ) {
+                          clearPosts.mutate(activePlan.id);
+                        }
+                      }}
+                      disabled={clearPosts.isPending}
+                      title="Vide le calendrier de toutes ses publications"
+                    >
+                      {clearPosts.isPending ? <Spinner /> : '🧹'} Vider
+                    </button>
+                  )}
+                  <button
+                    className="btn-ghost !py-1.5 !px-3 text-sm !text-red-500 hover:!bg-red-500/10"
+                    onClick={() => {
+                      if (confirm(`Supprimer définitivement le calendrier « ${activePlan.name} » et ses publications ?`)) {
+                        deletePlan.mutate(activePlan.id);
+                      }
+                    }}
+                    disabled={deletePlan.isPending}
+                    title="Supprime ce calendrier et toutes ses publications"
+                  >
+                    {deletePlan.isPending ? <Spinner /> : '🗑️'} Supprimer
+                  </button>
                 </div>
               </div>
 
               {(activePlan.posts?.length ?? 0) === 0 ? (
-                <EmptyState title="Aucune publication dans ce calendrier." />
+                <EmptyState title="Aucune publication dans ce calendrier. Utilisez « ➕ Publication » pour en ajouter une." />
               ) : (
                 <GlassPanel>
                   {viewMode === 'list' && (
-                    <ListView posts={activePlan.posts!} onSelect={setSelectedPost} />
+                    <ListView
+                      posts={activePlan.posts!}
+                      onSelect={setSelectedPost}
+                      deletingId={deletingPostId}
+                      onDelete={(p) => {
+                        if (confirm(`Supprimer la publication « ${p.title} » ?`)) {
+                          deletePost.mutate(p.id);
+                        }
+                      }}
+                    />
                   )}
                   {viewMode === 'month' && (
                     <MonthView posts={activePlan.posts!} anchor={anchor} onSelect={setSelectedPost} />
@@ -296,6 +453,69 @@ export function CalendarPage() {
       )}
 
       <PostModal post={selectedPost} planId={activePlanId ?? ''} onClose={() => setSelectedPost(null)} />
+
+      {/* ─── Modale : ajout manuel d'une publication ─── */}
+      <Modal open={postOpen} onClose={() => setPostOpen(false)} title="Ajouter une publication">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-secondary">
+            La publication est enregistrée telle quelle : aucun contenu n'est généré par l'IA.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Field label="Date de publication">
+              <input type="date" className="glass-input" value={pDate} onChange={(e) => setPDate(e.target.value)} />
+            </Field>
+            <Field label="Réseau">
+              <select
+                className="glass-input"
+                value={pNetwork}
+                onChange={(e) => setPNetwork(e.target.value as Network)}
+              >
+                {NETWORKS.map((n) => (
+                  <option key={n.value} value={n.value}>
+                    {n.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <Field label="Titre">
+            <input
+              className="glass-input"
+              value={pTitle}
+              onChange={(e) => setPTitle(e.target.value)}
+              placeholder="ex : Annonce de notre porte ouverte"
+            />
+          </Field>
+          <Field label="Contenu">
+            <textarea
+              className="glass-input min-h-[140px] resize-y"
+              value={pContent}
+              onChange={(e) => setPContent(e.target.value)}
+              placeholder="Rédigez votre publication…"
+            />
+          </Field>
+          <Field label="Hashtags (optionnel)">
+            <input
+              className="glass-input"
+              value={pHashtags}
+              onChange={(e) => setPHashtags(e.target.value)}
+              placeholder="#exemple #buzzy"
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <button className="btn-ghost text-sm" onClick={() => setPostOpen(false)}>
+              Annuler
+            </button>
+            <button
+              className="btn-primary text-sm flex items-center gap-2"
+              onClick={() => createPost.mutate()}
+              disabled={createPost.isPending || !pTitle.trim()}
+            >
+              {createPost.isPending ? <Spinner /> : '➕'} Ajouter la publication
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ─── Modale : ajout manuel d'un événement ─── */}
       <Modal open={manualOpen} onClose={() => setManualOpen(false)} title="Ajouter un événement">
@@ -365,11 +585,15 @@ function PlanSelector({
   loading,
   activePlanId,
   onSelect,
+  onDelete,
+  deletingId,
 }: {
   plans: PostPlan[];
   loading: boolean;
   activePlanId: string | null;
   onSelect: (id: string) => void;
+  onDelete: (plan: PostPlan) => void;
+  deletingId: string | null;
 }) {
   if (loading) return <Skeleton />;
   if (plans.length === 0) return null;
@@ -378,16 +602,27 @@ function PlanSelector({
       <h2 className="text-lg font-display font-semibold text-secondary">Mes calendriers</h2>
       <div className="flex flex-wrap gap-2">
         {plans.map((p) => (
-          <button
+          <div
             key={p.id}
-            onClick={() => onSelect(p.id)}
-            className={
-              activePlanId === p.id ? 'btn-primary !py-2 !px-4 text-sm' : 'btn-ghost !py-2 !px-4 text-sm'
-            }
+            className={`flex items-center rounded-xl ${
+              activePlanId === p.id ? 'btn-primary !p-0' : 'btn-ghost !p-0'
+            }`}
           >
-            {p.name}{' '}
-            <span className="opacity-60 text-xs">({p._count?.posts ?? p.posts?.length ?? 0})</span>
-          </button>
+            <button onClick={() => onSelect(p.id)} className="!py-2 !pl-4 !pr-2 text-sm">
+              {p.name}{' '}
+              <span className="opacity-60 text-xs">({p._count?.posts ?? p.posts?.length ?? 0})</span>
+            </button>
+            <button
+              onClick={() => onDelete(p)}
+              disabled={deletingId === p.id}
+              aria-label={`Supprimer le calendrier « ${p.name} »`}
+              title="Supprimer ce calendrier"
+              className="h-7 w-7 mr-1.5 rounded-lg flex items-center justify-center text-xs
+                         opacity-50 hover:opacity-100 hover:bg-red-500/20 transition-opacity disabled:opacity-30"
+            >
+              {deletingId === p.id ? '…' : '🗑️'}
+            </button>
+          </div>
         ))}
       </div>
     </div>

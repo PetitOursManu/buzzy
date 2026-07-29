@@ -3,12 +3,56 @@ import { prisma } from '../lib/prisma';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
-import { postUpdateSchema } from './schemas';
+import { postCreateSchema, postUpdateSchema } from './schemas';
 import { regeneratePost } from '../services/calendar.service';
 import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 
 const router = Router();
 router.use(requireAuth);
+
+/**
+ * Ajoute une publication à la main dans un calendrier existant.
+ * Aucune génération IA : le contenu fourni est enregistré tel quel.
+ */
+router.post('/', validate(postCreateSchema), async (req, res) => {
+  const body = req.body as {
+    postPlanId: string;
+    scheduledDate: string;
+    network: string;
+    title: string;
+    content: string;
+    hashtags: string[];
+    relatedEventId?: string | null;
+  };
+
+  const plan = await prisma.postPlan.findUnique({ where: { id: body.postPlanId } });
+  if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
+
+  const scheduledDate = new Date(body.scheduledDate);
+  if (isNaN(scheduledDate.getTime())) {
+    return res.status(400).json({ error: 'Date de publication invalide.' });
+  }
+
+  if (body.relatedEventId) {
+    const event = await prisma.event.findUnique({ where: { id: body.relatedEventId } });
+    if (!event) return res.status(404).json({ error: 'Événement lié introuvable.' });
+  }
+
+  const post = await prisma.post.create({
+    data: {
+      postPlanId: body.postPlanId,
+      scheduledDate,
+      network: body.network,
+      title: body.title.trim().slice(0, 300),
+      content: body.content,
+      hashtags: body.hashtags.map((h) => h.replace(/^#/, '')).filter(Boolean),
+      relatedEventId: body.relatedEventId ?? null,
+      status: 'DRAFT',
+    },
+    include: { relatedEvent: true },
+  });
+  return res.status(201).json(post);
+});
 
 router.put('/:id', validate(postUpdateSchema), async (req, res) => {
   const { id } = req.params;
@@ -29,6 +73,16 @@ router.put('/:id', validate(postUpdateSchema), async (req, res) => {
 
   const post = await prisma.post.update({ where: { id }, data });
   return res.json(post);
+});
+
+/** Supprime une publication d'un calendrier. */
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.post.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Publication introuvable.' });
+
+  await prisma.post.delete({ where: { id } });
+  return res.json({ ok: true, id });
 });
 
 router.post('/:id/regenerate', aiGenerationLimiter, async (req, res) => {

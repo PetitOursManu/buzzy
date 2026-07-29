@@ -182,17 +182,39 @@ export const calendarApi = {
     selectedEventIds: string[];
     discoveryFilters?: { scope: string; region?: string; themes: string[] };
   }) =>
-    request<{ postPlan: PostPlan; posts: PostItem[] }>('/calendar/generate', {
+    request<{ postPlan: PostPlan; posts: PostItem[]; warning?: string }>('/calendar/generate', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  /** Crée un calendrier vide, sans aucune génération IA. */
+  createEmpty: (data: {
+    name?: string;
+    startDate: string;
+    endDate: string;
+    frequency?: Frequency;
+    networks: Network[];
+  }) => request<PostPlan>('/calendar', { method: 'POST', body: JSON.stringify(data) }),
   list: () => request<PostPlan[]>('/calendar'),
   get: (id: string) => request<PostPlan>(`/calendar/${id}`),
+  remove: (id: string) => request<{ ok: boolean; id: string }>(`/calendar/${id}`, { method: 'DELETE' }),
+  clearPosts: (id: string) =>
+    request<{ deleted: number }>(`/calendar/${id}/posts`, { method: 'DELETE' }),
   exportUrl: (id: string, format: 'json' | 'csv') => `/api/calendar/${id}/export?format=${format}`,
 };
 
 /* ─── Posts ────────────────────────────────────────────────────── */
 export const postsApi = {
+  /** Ajoute une publication à la main dans un calendrier (sans IA). */
+  create: (data: {
+    postPlanId: string;
+    scheduledDate: string;
+    network: Network;
+    title: string;
+    content?: string;
+    hashtags?: string[];
+    relatedEventId?: string | null;
+  }) => request<PostItem>('/posts', { method: 'POST', body: JSON.stringify(data) }),
+  remove: (id: string) => request<{ ok: boolean; id: string }>(`/posts/${id}`, { method: 'DELETE' }),
   update: (
     id: string,
     data: Partial<{ title: string; content: string; hashtags: string[]; status: string }>,

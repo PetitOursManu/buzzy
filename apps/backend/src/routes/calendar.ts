@@ -3,8 +3,8 @@ import { prisma } from '../lib/prisma';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
-import { calendarGenerateSchema } from './schemas';
-import { generateCalendar } from '../services/calendar.service';
+import { calendarCreateSchema, calendarGenerateSchema } from './schemas';
+import { createEmptyCalendar, generateCalendar } from '../services/calendar.service';
 import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 import { toCsv } from '../lib/csv';
 
@@ -46,6 +46,7 @@ router.post('/generate', aiGenerationLimiter, validate(calendarGenerateSchema), 
     return res.json({
       postPlan: result.postPlan,
       posts: result.posts,
+      warning: result.warning,
     });
   } catch (e) {
     if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
@@ -53,6 +54,38 @@ router.post('/generate', aiGenerationLimiter, validate(calendarGenerateSchema), 
     console.error('Erreur génération calendrier:', e);
     return res.status(500).json({ error: 'Erreur inattendue lors de la génération du calendrier.' });
   }
+});
+
+/**
+ * Crée un calendrier vide. Aucun appel à l'IA n'est effectué : le calendrier
+ * est créé tel quel, sans aucune publication.
+ */
+router.post('/', validate(calendarCreateSchema), async (req, res) => {
+  const body = req.body as {
+    name?: string;
+    startDate: string;
+    endDate: string;
+    frequency?: { type: 'day' | 'week' | 'month'; count: number };
+    networks: string[];
+  };
+
+  const startDate = new Date(body.startDate);
+  const endDate = new Date(body.endDate);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return res.status(400).json({ error: 'Dates invalides.' });
+  }
+  if (endDate < startDate) {
+    return res.status(400).json({ error: 'La date de fin précède la date de début.' });
+  }
+
+  const plan = await createEmptyCalendar({
+    name: body.name,
+    startDate,
+    endDate,
+    frequency: body.frequency,
+    networks: body.networks,
+  });
+  return res.status(201).json(plan);
 });
 
 /** Liste tous les calendriers (plans) générés. */
@@ -77,6 +110,26 @@ router.get('/:postPlanId', async (req, res) => {
   });
   if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
   return res.json(plan);
+});
+
+/** Supprime un calendrier et toutes ses publications (cascade Prisma). */
+router.delete('/:postPlanId', async (req, res) => {
+  const { postPlanId } = req.params;
+  const plan = await prisma.postPlan.findUnique({ where: { id: postPlanId } });
+  if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
+
+  await prisma.postPlan.delete({ where: { id: postPlanId } });
+  return res.json({ ok: true, id: postPlanId });
+});
+
+/** Vide un calendrier de toutes ses publications, en le conservant. */
+router.delete('/:postPlanId/posts', async (req, res) => {
+  const { postPlanId } = req.params;
+  const plan = await prisma.postPlan.findUnique({ where: { id: postPlanId } });
+  if (!plan) return res.status(404).json({ error: 'Calendrier introuvable.' });
+
+  const result = await prisma.post.deleteMany({ where: { postPlanId } });
+  return res.json({ deleted: result.count });
 });
 
 router.get('/:postPlanId/export', async (req, res) => {
