@@ -124,6 +124,45 @@ async function resolveSourceEvents(input: CalendarGenerationInput): Promise<Pris
   return prisma.event.findMany({ where, orderBy: { createdAt: 'desc' }, take: 30 });
 }
 
+/**
+ * Attribue une date de publication à chaque événement, sans jamais en répéter
+ * un seul.
+ *
+ * - Un événement daté dans la plage du calendrier est publié à sa propre date :
+ *   c'est ce qu'on attend d'un calendrier éditorial.
+ * - Un événement sans date, ou daté hors de la plage, reçoit un créneau issu de
+ *   la fréquence choisie, pour rester à l'intérieur du calendrier.
+ */
+function assignEventDates(
+  events: PrismaEvent[],
+  scheduleDates: Date[],
+  rangeStart: Date,
+  rangeEnd: Date,
+): Date[] {
+  const startMs = new Date(rangeStart).setHours(0, 0, 0, 0);
+  const endMs = new Date(rangeEnd).setHours(23, 59, 59, 999);
+
+  // Créneaux de repli, consommés dans l'ordre par les événements sans date
+  // exploitable. On boucle si les événements sont plus nombreux.
+  const fallbacks = scheduleDates.length > 0 ? scheduleDates : [new Date(startMs)];
+  let fallbackCursor = 0;
+
+  return events.map((event) => {
+    if (event.eventDate) {
+      const t = event.eventDate.getTime();
+      if (!isNaN(t) && t >= startMs && t <= endMs) {
+        const d = new Date(t);
+        // Heure de publication normalisée : 10h.
+        d.setHours(10, 0, 0, 0);
+        return d;
+      }
+    }
+    const slot = fallbacks[fallbackCursor % fallbacks.length];
+    fallbackCursor++;
+    return new Date(slot);
+  });
+}
+
 function stripHashtagsFromContent(content: string): string {
   return content.trim();
 }
@@ -265,14 +304,15 @@ export async function generateCalendar(
     };
   }
 
-  // Garde-fou : limite le nombre total de publications générées (coût/temps).
+  // Garde-fou : limite le nombre total de publications créées.
   const MAX_POSTS = 120;
-  const plannedTotal = scheduleDates.length * input.networks.length;
-  const dateLimit =
-    plannedTotal > MAX_POSTS
-      ? Math.max(1, Math.floor(MAX_POSTS / input.networks.length))
-      : scheduleDates.length;
-  const usedDates = scheduleDates.slice(0, dateLimit);
+  const eventLimit = Math.max(1, Math.floor(MAX_POSTS / input.networks.length));
+  const usedEvents = sourceEvents.slice(0, eventLimit);
+
+  // Chaque événement ne donne qu'UNE publication par réseau. On n'étale plus le
+  // même événement sur toutes les dates de la fréquence : les textes étant
+  // repris tels quels, cela ne produisait que des doublons à l'identique.
+  const dates = assignEventDates(usedEvents, scheduleDates, input.startDate, input.endDate);
 
   const postPlan = await createPlanRecord({
     name: input.name,
@@ -283,12 +323,9 @@ export async function generateCalendar(
   });
 
   const posts: Post[] = [];
-  let eventCursor = 0;
 
-  for (const date of usedDates) {
-    // Un événement source tourne (round-robin) sur les dates.
-    const event = sourceEvents[eventCursor % sourceEvents.length];
-    eventCursor++;
+  for (const [index, event] of usedEvents.entries()) {
+    const date = dates[index];
 
     for (const network of input.networks) {
       // Aucun appel au LLM ici : le titre et la description ont déjà été
@@ -314,7 +351,15 @@ export async function generateCalendar(
     }
   }
 
-  return { postPlan, posts };
+  const skipped = sourceEvents.length - usedEvents.length;
+  return {
+    postPlan,
+    posts,
+    warning:
+      skipped > 0
+        ? `${skipped} événement(s) non repris : la limite de ${MAX_POSTS} publications par calendrier est atteinte.`
+        : undefined,
+  };
 }
 
 /** Régénère le contenu d'une publication existante. */

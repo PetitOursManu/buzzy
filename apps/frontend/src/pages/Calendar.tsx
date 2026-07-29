@@ -219,7 +219,10 @@ export function CalendarPage() {
           </div>
         </div>
 
-        <Field label="Fréquence de publication">
+        <Field
+          label="Fréquence de publication"
+          hint="Chaque événement ne donne qu'une publication par réseau, à sa propre date. Cette fréquence ne sert qu'à répartir les événements sans date, ou datés hors de la plage."
+        >
           <div className="flex flex-wrap items-center gap-3">
             <input
               type="number"
