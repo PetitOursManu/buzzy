@@ -92,7 +92,7 @@ function authHeaders(apiKey: string): Record<string, string> {
 }
 
 /** Récupère et parse la liste des modèles à partir d'une base précise. */
-async function fetchModelsFrom(base: string, apiKey: string): Promise<string[]> {
+async function fetchModelsFrom(base: string, apiKey: string): Promise<ModelInfo[]> {
   const url = `${base}/models`;
   let res: Response;
   try {
@@ -133,7 +133,7 @@ async function fetchModelsFrom(base: string, apiKey: string): Promise<string[]> 
 export async function listModels(
   baseUrl: string,
   apiKey: string,
-): Promise<{ models: string[]; baseUrl: string }> {
+): Promise<{ models: ModelInfo[]; baseUrl: string }> {
   const base = normalizeBaseUrl(baseUrl);
   const candidates = [base];
   if (!/\/v\d+$/.test(base)) {
@@ -159,24 +159,65 @@ export async function listModels(
     : new AiRequestError('Impossible de récupérer la liste des modèles.');
 }
 
-function extractModelIds(data: unknown): string[] {
-  // Format OpenAI : { data: [{ id }] }
+export interface ModelInfo {
+  id: string;
+  /**
+   * Prise en charge de l'appel d'outils (tools / function calling).
+   * `null` quand le fournisseur ne renseigne pas la capacité : on ne peut alors
+   * ni l'affirmer ni la nier.
+   */
+  supportsTools: boolean | null;
+}
+
+/**
+ * Déduit la prise en charge des tools à partir des métadonnées du fournisseur.
+ * OpenRouter expose `supported_parameters` ; d'autres exposent `capabilities`.
+ * En l'absence d'information, on retourne `null` plutôt que de deviner.
+ */
+function detectToolSupport(entry: any): boolean | null {
+  if (!entry || typeof entry !== 'object') return null;
+
+  // OpenRouter : supported_parameters: ["tools", "tool_choice", …]
+  const params = entry.supported_parameters;
+  if (Array.isArray(params)) {
+    return params.some((p: unknown) => typeof p === 'string' && /^tools?$/i.test(p));
+  }
+
+  // Variantes : capabilities: { tools: true } ou capabilities: ["tools"]
+  const caps = entry.capabilities;
+  if (Array.isArray(caps)) {
+    return caps.some((c: unknown) => typeof c === 'string' && /tool|function/i.test(c));
+  }
+  if (caps && typeof caps === 'object') {
+    const v = caps.tools ?? caps.function_calling ?? caps.tool_calls;
+    if (typeof v === 'boolean') return v;
+  }
+
+  return null;
+}
+
+function toModelInfo(entry: any): ModelInfo | null {
+  if (typeof entry === 'string') return { id: entry, supportsTools: null };
+  const id = entry?.id ?? entry?.name;
+  if (typeof id !== 'string') return null;
+  return { id, supportsTools: detectToolSupport(entry) };
+}
+
+function extractModelIds(data: unknown): ModelInfo[] {
+  const pick = (list: unknown[]): ModelInfo[] =>
+    list.map(toModelInfo).filter((m): m is ModelInfo => m !== null);
+
+  // Format OpenAI / OpenRouter : { data: [{ id, supported_parameters }] }
   if (data && typeof data === 'object' && 'data' in data && Array.isArray((data as any).data)) {
-    return (data as any).data
-      .map((m: any) => m?.id ?? m?.name)
-      .filter((x: unknown): x is string => typeof x === 'string');
+    return pick((data as any).data);
   }
   // Format Ollama : { models: [{ name }] }
   if (data && typeof data === 'object' && 'models' in data && Array.isArray((data as any).models)) {
-    return (data as any).models
-      .map((m: any) => m?.name ?? m?.id)
-      .filter((x: unknown): x is string => typeof x === 'string');
+    return pick((data as any).models);
   }
   // Tableau brut
   if (Array.isArray(data)) {
-    return data
-      .map((m: any) => (typeof m === 'string' ? m : m?.id ?? m?.name))
-      .filter((x: unknown): x is string => typeof x === 'string');
+    return pick(data);
   }
   return [];
 }

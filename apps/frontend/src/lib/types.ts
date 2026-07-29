@@ -99,3 +99,10 @@ export type DateTarget =
   | { kind: 'month'; month: number; year: number }
   | { kind: 'date'; date: string }
   | { kind: 'range'; start: string; end: string };
+
+/** Modèle proposé par le fournisseur IA, avec sa prise en charge des tools. */
+export interface ModelInfo {
+  id: string;
+  /** `null` quand le fournisseur ne renseigne pas la capacité. */
+  supportsTools: boolean | null;
+}

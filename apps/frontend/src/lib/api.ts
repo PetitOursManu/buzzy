@@ -5,6 +5,7 @@ import type {
   EventScope,
   Frequency,
   McpServerInfo,
+  ModelInfo,
   Network,
   PostItem,
   PostPlan,
@@ -73,7 +74,7 @@ export const settingsApi = {
       body: JSON.stringify(data),
     }),
   listModels: (baseUrl: string, apiKey?: string) =>
-    request<{ models: string[]; baseUrl: string; warning?: string }>(
+    request<{ models: ModelInfo[]; baseUrl: string; warning?: string }>(
       '/settings/ai-provider/list-models',
       {
         method: 'POST',
