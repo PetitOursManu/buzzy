@@ -230,6 +230,28 @@ export interface ChatOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Paramètres facultatifs de la requête : purement qualitatifs, ils peuvent être
+ * retirés sans changer la nature de l'appel. Tous les modèles ne les acceptent
+ * pas — les modèles de raisonnement, notamment, rejettent fréquemment
+ * `temperature` ou `reasoning_effort`. L'ordre est celui du retrait.
+ */
+const OPTIONAL_PARAMS = ['reasoning_effort', 'response_format', 'temperature'] as const;
+
+/** Repère, dans le message d'erreur du fournisseur, un paramètre facultatif mis en cause. */
+function rejectedParam(errorText: string, body: Record<string, unknown>): string | null {
+  const lower = errorText.toLowerCase();
+  for (const p of OPTIONAL_PARAMS) {
+    if (p in body && lower.includes(p)) return p;
+  }
+  return null;
+}
+
+/** Statuts pour lesquels un paramètre refusé est plausible. */
+function isParamRejection(status: number): boolean {
+  return status === 400 || status === 404 || status === 422;
+}
+
 /** Appel de chat completion compatible OpenAI. */
 export async function chatCompletion(
   config: AiProviderConfig,
@@ -242,8 +264,7 @@ export async function chatCompletion(
     temperature: options.temperature ?? 0.7,
   };
   // Effort de réflexion (reasoning) — envoyé uniquement si configuré et non "none".
-  // Format OpenAI standard : reasoning_effort. Les modèles qui ne le gèrent pas
-  // l'ignorent généralement ; ceux qui le rejettent renverront une erreur claire.
+  // Format OpenAI standard : reasoning_effort.
   const effort = config.reasoningEffort;
   if (effort && effort !== 'none') {
     body.reasoning_effort = effort;
@@ -256,25 +277,51 @@ export async function chatCompletion(
     body.response_format = { type: 'json_object' };
   }
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: authHeaders(config.apiKey),
-      body: JSON.stringify(body),
-      signal: options.signal,
-    });
-  } catch (e) {
-    throw new AiRequestError(`Connexion impossible au modèle IA. (${(e as Error).message})`);
+  const attempt = async (payload: Record<string, unknown>): Promise<Response> => {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: authHeaders(config.apiKey),
+        body: JSON.stringify(payload),
+        signal: options.signal,
+      });
+    } catch (e) {
+      throw new AiRequestError(`Connexion impossible au modèle IA. (${(e as Error).message})`);
+    }
+  };
+
+  let res = await attempt(body);
+
+  // Un paramètre facultatif refusé ne doit pas faire échouer toute la
+  // génération : on le retire et on retente. D'abord celui que le fournisseur
+  // nomme, puis, s'il n'en nomme aucun, tous d'un coup.
+  let firstError: { status: number; text: string } | null = null;
+  while (!res.ok && isParamRejection(res.status)) {
+    const text = await safeText(res);
+    if (!firstError) firstError = { status: res.status, text };
+
+    const named = rejectedParam(text, body);
+    if (named) {
+      delete body[named];
+      console.warn(`[ia] ${named} refusé par ${config.model} — nouvelle tentative sans.`);
+    } else {
+      const dropped = OPTIONAL_PARAMS.filter((p) => p in body);
+      if (dropped.length === 0) break; // plus rien à retirer : erreur réelle
+      dropped.forEach((p) => delete body[p]);
+      console.warn(
+        `[ia] ${config.model} a répondu ${res.status} sans nommer de paramètre — nouvelle tentative sans ${dropped.join(', ')}.`,
+      );
+    }
+    res = await attempt(body);
   }
 
   if (!res.ok) {
-    const text = await safeText(res);
-    // Certains fournisseurs renvoient 400/404 si response_format non supporté :
-    // on relaie l'erreur pour que l'appelant puisse retenter sans.
+    // On rapporte l'erreur d'origine : elle décrit le vrai refus, alors que la
+    // dernière peut ne refléter qu'une tentative dégradée.
+    const err = firstError ?? { status: res.status, text: await safeText(res) };
     throw new AiRequestError(
-      `Le modèle a répondu ${res.status}. ${text || ''}`.trim(),
-      res.status,
+      `Le modèle a répondu ${err.status}. ${err.text || ''}`.trim(),
+      err.status,
     );
   }
 
