@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { calendarApi, postsApi, ApiError } from '../lib/api';
 import type { Network, PostItem, PostPlan } from '../lib/types';
-import { NETWORKS } from '../lib/constants';
+import { NETWORK_LABEL } from '../lib/constants';
 import { CardSkeleton, EmptyState, Field, GlassPanel, Modal, Spinner } from '../components/ui';
 import { ListView, MonthView, WeekView } from '../components/CalendarViews';
 import { ManualEventModal } from '../components/ManualEventModal';
@@ -11,6 +12,7 @@ import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
 import { useToast } from '../hooks/useToast';
 import { useSelection } from '../hooks/useSelection';
+import { usePreferredNetworks } from '../hooks/usePreferredNetworks';
 
 type FreqType = 'day' | 'week' | 'month';
 type ViewMode = 'month' | 'week' | 'list';
@@ -32,7 +34,23 @@ export function CalendarPage() {
   const [endDate, setEndDate] = useState(iso(inTwoWeeks));
   const [freqType, setFreqType] = useState<FreqType>('week');
   const [freqCount, setFreqCount] = useState(3);
-  const [networks, setNetworks] = useState<Network[]>(['instagram', 'linkedin']);
+  // Seuls les réseaux retenus dans les Paramètres sont proposés : ce sont les
+  // seuls pour lesquels une description a été rédigée lors de la découverte.
+  const { networks: preferredNetworks, loading: networksLoading, isEmpty: noPreferredNetworks } =
+    usePreferredNetworks();
+  const [networks, setNetworks] = useState<Network[]>([]);
+
+  // Tout réseau retiré des Paramètres disparaît aussi de la sélection en cours.
+  useEffect(() => {
+    if (networksLoading) return;
+    setNetworks((prev) => {
+      const kept = prev.filter((n) => preferredNetworks.includes(n));
+      // Première visite : on part de tous les réseaux configurés.
+      if (prev.length === 0) return preferredNetworks;
+      return kept.length === prev.length ? prev : kept;
+    });
+  }, [preferredNetworks, networksLoading]);
+
   const [eventSource, setEventSource] = useState<'selected' | 'ai'>(
     selectedIds.length > 0 ? 'selected' : 'ai',
   );
@@ -130,7 +148,7 @@ export function CalendarPage() {
   // Ajout manuel d'une publication dans le calendrier actif.
   const [postOpen, setPostOpen] = useState(false);
   const [pDate, setPDate] = useState(iso(today));
-  const [pNetwork, setPNetwork] = useState<Network>('instagram');
+  const [pNetwork, setPNetwork] = useState<Network | ''>('');
   const [pTitle, setPTitle] = useState('');
   const [pContent, setPContent] = useState('');
   const [pHashtags, setPHashtags] = useState('');
@@ -140,7 +158,7 @@ export function CalendarPage() {
       postsApi.create({
         postPlanId: activePlanId!,
         scheduledDate: new Date(`${pDate}T10:00:00`).toISOString(),
-        network: pNetwork,
+        network: pNetwork as Network,
         title: pTitle.trim(),
         content: pContent,
         hashtags: pHashtags
@@ -227,12 +245,32 @@ export function CalendarPage() {
           </div>
         </Field>
 
-        <Field label="Réseaux ciblés">
-          <NetworkSelector
-            networks={NETWORKS.map((n) => n.value)}
-            selected={networks}
-            onToggle={toggleNetwork}
-          />
+        <Field
+          label="Réseaux ciblés"
+          hint={
+            noPreferredNetworks
+              ? undefined
+              : 'Limités aux réseaux retenus dans les Paramètres : ce sont ceux dont les descriptions ont déjà été rédigées.'
+          }
+        >
+          {networksLoading ? (
+            <div className="shimmer rounded-xl h-24 w-full max-w-md" />
+          ) : noPreferredNetworks ? (
+            <div className="glass rounded-xl p-4 flex flex-col gap-2">
+              <p className="text-sm text-amber-500">
+                Aucun réseau retenu dans les Paramètres.
+              </p>
+              <p className="text-xs text-secondary">
+                Les descriptions d'événements sont rédigées uniquement pour les réseaux choisis dans
+                votre profil. Sélectionnez-en au moins un pour pouvoir générer un calendrier.
+              </p>
+              <Link to="/parametres" className="btn-ghost text-sm self-start !py-1.5 !px-3">
+                ⚙️ Choisir mes réseaux
+              </Link>
+            </div>
+          ) : (
+            <NetworkSelector networks={preferredNetworks} selected={networks} onToggle={toggleNetwork} />
+          )}
         </Field>
 
         <Field label="Source des événements">
@@ -270,7 +308,7 @@ export function CalendarPage() {
             onClick={() => generate.mutate()}
             disabled={generate.isPending || createEmpty.isPending || networks.length === 0}
           >
-            {generate.isPending ? <Spinner /> : <span aria-hidden>✨</span>}
+            {generate.isPending ? <Spinner /> : <span aria-hidden>📅</span>}
             Générer le calendrier
           </button>
           <button
@@ -284,8 +322,9 @@ export function CalendarPage() {
           </button>
         </div>
         <p className="text-xs text-muted -mt-2">
-          Un calendrier vide est créé tel quel : aucune publication et aucun événement ne sont
-          générés. Vous y ajoutez ensuite vos publications à la main.
+          La génération reprend les titres et descriptions déjà rédigés lors de la découverte, sans
+          rappeler l'IA. Pour retoucher un texte, utilisez « Régénérer » sur la publication
+          concernée. Un calendrier vide, lui, est créé sans aucune publication.
         </p>
       </GlassPanel>
 
@@ -353,7 +392,12 @@ export function CalendarPage() {
                     className="btn-ghost !py-1.5 !px-3 text-sm"
                     onClick={() => {
                       setPDate(iso(new Date(activePlan.startDate)));
-                      setPNetwork(activePlan.networks[0] ?? 'instagram');
+                      // Réseau du calendrier s'il fait partie des réseaux
+                      // configurés, sinon le premier réseau configuré.
+                      const planNetwork = activePlan.networks.find((n) =>
+                        preferredNetworks.includes(n),
+                      );
+                      setPNetwork(planNetwork ?? preferredNetworks[0] ?? '');
                       setPostOpen(true);
                     }}
                   >
@@ -445,9 +489,10 @@ export function CalendarPage() {
                 value={pNetwork}
                 onChange={(e) => setPNetwork(e.target.value as Network)}
               >
-                {NETWORKS.map((n) => (
-                  <option key={n.value} value={n.value}>
-                    {n.label}
+                {preferredNetworks.length === 0 && <option value="">Aucun réseau configuré</option>}
+                {preferredNetworks.map((n) => (
+                  <option key={n} value={n}>
+                    {NETWORK_LABEL[n]}
                   </option>
                 ))}
               </select>
@@ -484,7 +529,7 @@ export function CalendarPage() {
             <button
               className="btn-primary text-sm flex items-center gap-2"
               onClick={() => createPost.mutate()}
-              disabled={createPost.isPending || !pTitle.trim()}
+              disabled={createPost.isPending || !pTitle.trim() || !pNetwork}
             >
               {createPost.isPending ? <Spinner /> : '➕'} Ajouter la publication
             </button>

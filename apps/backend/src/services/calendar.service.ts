@@ -21,6 +21,18 @@ export function preGeneratedDescription(event: PrismaEvent | null, network: stri
   return typeof val === 'string' && val.trim() ? val.trim() : null;
 }
 
+/**
+ * Saisie invalide au moment de générer un calendrier. La génération n'appelant
+ * plus le LLM, ces erreurs n'ont rien d'un incident réseau : elles se traduisent
+ * par un 400 et non par un 502.
+ */
+export class CalendarInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CalendarInputError';
+  }
+}
+
 export interface Frequency {
   type: 'day' | 'week' | 'month';
   count: number;
@@ -224,10 +236,12 @@ export async function generateCalendar(
   const scheduleDates = computeScheduleDates(input.startDate, input.endDate, input.frequency);
 
   if (scheduleDates.length === 0) {
-    throw new AiRequestError('La plage de dates et la fréquence ne produisent aucune publication.');
+    throw new CalendarInputError(
+      'La plage de dates et la fréquence ne produisent aucune publication.',
+    );
   }
   if (input.networks.length === 0) {
-    throw new AiRequestError('Sélectionnez au moins un réseau social.');
+    throw new CalendarInputError('Sélectionnez au moins un réseau social.');
   }
 
   // Aucun événement source : on crée le calendrier vide plutôt que d'inventer
@@ -250,9 +264,6 @@ export async function generateCalendar(
           : 'Calendrier créé vide : aucun événement enregistré ne correspond aux filtres. Lancez une découverte, puis relancez la génération.',
     };
   }
-
-  const config = await getActiveAiConfig();
-  const profile = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
 
   // Garde-fou : limite le nombre total de publications générées (coût/temps).
   const MAX_POSTS = 120;
@@ -280,45 +291,21 @@ export async function generateCalendar(
     eventCursor++;
 
     for (const network of input.networks) {
-      let generated: { title: string; content: string; hashtags: string[] };
-
-      // Réutilise la description déjà générée pour ce réseau au niveau de
-      // l'événement (identique à ce qui est affiché sur la carte de découverte).
-      const preGenerated = preGeneratedDescription(event, network);
-      if (preGenerated) {
-        generated = { title: event.title, content: preGenerated, hashtags: [] };
-      } else {
-        const ctx: PostGenContext = {
-          network,
-          scheduledDate: date,
-          event: {
-            title: event.title,
-            description: event.description,
-            eventDate: event.eventDate,
-            eventPeriod: event.eventPeriod,
-            theme: event.theme,
-          },
-        };
-        try {
-          generated = await generateOnePost(config, profile, ctx);
-        } catch (e) {
-          // On persiste un brouillon d'erreur plutôt que d'échouer tout le calendrier.
-          generated = {
-            title: event.title,
-            content: `⚠️ Génération échouée : ${(e as Error).message}. Vous pouvez régénérer ce post.`,
-            hashtags: [],
-          };
-        }
-      }
+      // Aucun appel au LLM ici : le titre et la description ont déjà été
+      // rédigés lors de la découverte, sur la page principale. On reprend la
+      // description propre à ce réseau si elle existe, sinon la description
+      // générale de l'événement. Pour retoucher un texte, le bouton
+      // « Régénérer » de la publication reste disponible à la demande.
+      const content = preGeneratedDescription(event, network) ?? event.description;
 
       const post = await prisma.post.create({
         data: {
           postPlanId: postPlan.id,
           scheduledDate: date,
           network,
-          title: generated.title.slice(0, 300),
-          content: generated.content,
-          hashtags: generated.hashtags,
+          title: event.title.slice(0, 300),
+          content,
+          hashtags: [],
           relatedEventId: event.id,
           status: 'DRAFT',
         },

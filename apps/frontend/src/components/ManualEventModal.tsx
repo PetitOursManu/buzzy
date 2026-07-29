@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { calendarApi, eventsApi, ApiError } from '../lib/api';
 import type { EventItem, EventScope, Network } from '../lib/types';
-import { NETWORK_EMOJI, NETWORK_LABEL, NETWORKS, SCOPES, THEMES } from '../lib/constants';
+import { NETWORK_EMOJI, NETWORK_LABEL, SCOPES, THEMES } from '../lib/constants';
 import { Field, Modal, Spinner } from './ui';
 import { useToast } from '../hooks/useToast';
+import { usePreferredNetworks } from '../hooks/usePreferredNetworks';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -52,9 +53,15 @@ export function ManualEventModal({
   const plans = plansQuery.data ?? [];
   const selectedPlan = plans.find((p) => p.id === planId) ?? null;
 
-  // À l'ouverture d'un calendrier, on présélectionne ses réseaux configurés.
+  // Mêmes réseaux que partout ailleurs : ceux retenus dans les Paramètres.
+  const { networks: preferredNetworks } = usePreferredNetworks();
+
+  // À l'ouverture d'un calendrier, on présélectionne ses réseaux, en écartant
+  // ceux qui ne sont plus retenus dans les Paramètres.
   useEffect(() => {
-    if (selectedPlan) setNetworks(selectedPlan.networks ?? []);
+    if (selectedPlan) {
+      setNetworks((selectedPlan.networks ?? []).filter((n) => preferredNetworks.includes(n)));
+    }
   }, [planId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Premier calendrier présélectionné dès que l'utilisateur choisit « Oui ».
@@ -224,19 +231,25 @@ export function ManualEventModal({
                 hint="Une publication est créée par réseau, reprenant le titre et la description de l'événement."
               >
                 <div className="flex flex-wrap gap-2">
-                  {NETWORKS.map((n) => (
+                  {preferredNetworks.map((n) => (
                     <button
-                      key={n.value}
+                      key={n}
                       type="button"
-                      onClick={() => toggleNetwork(n.value)}
-                      aria-pressed={networks.includes(n.value)}
-                      className={networks.includes(n.value) ? 'opt-tag opt-tag--active' : 'opt-tag'}
+                      onClick={() => toggleNetwork(n)}
+                      aria-pressed={networks.includes(n)}
+                      className={networks.includes(n) ? 'opt-tag opt-tag--active' : 'opt-tag'}
                     >
-                      <span aria-hidden>{NETWORK_EMOJI[n.value]}</span> {NETWORK_LABEL[n.value]}
+                      <span aria-hidden>{NETWORK_EMOJI[n]}</span> {NETWORK_LABEL[n]}
                     </button>
                   ))}
                 </div>
-                {noNetworks && (
+                {preferredNetworks.length === 0 && (
+                  <p className="text-xs text-amber-500 mt-2">
+                    Aucun réseau retenu dans les Paramètres. Choisissez-en au moins un dans votre
+                    profil pour pouvoir créer des publications.
+                  </p>
+                )}
+                {noNetworks && preferredNetworks.length > 0 && (
                   <p className="text-xs text-amber-500 mt-2">
                     Sélectionnez au moins un réseau pour créer les publications.
                   </p>

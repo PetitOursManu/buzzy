@@ -5,11 +5,11 @@ import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
 import { calendarAddEventSchema, calendarCreateSchema, calendarGenerateSchema } from './schemas';
 import {
+  CalendarInputError,
   createEmptyCalendar,
   generateCalendar,
   preGeneratedDescription,
 } from '../services/calendar.service';
-import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 import { toCsv } from '../lib/csv';
 
 const router = Router();
@@ -53,8 +53,7 @@ router.post('/generate', aiGenerationLimiter, validate(calendarGenerateSchema), 
       warning: result.warning,
     });
   } catch (e) {
-    if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
-    if (e instanceof AiRequestError) return res.status(502).json({ error: e.message });
+    if (e instanceof CalendarInputError) return res.status(400).json({ error: e.message });
     console.error('Erreur génération calendrier:', e);
     return res.status(500).json({ error: 'Erreur inattendue lors de la génération du calendrier.' });
   }
