@@ -2,7 +2,8 @@
 # Buzzy — Dockerfile multi-stage
 # 1. build-frontend : build Vite → dist
 # 2. build-backend  : compilation TypeScript + génération Prisma
-# 3. final          : image Node légère servant API + statique
+# 3. prod-deps      : dépendances d'exécution seules (image légère)
+# 4. final          : image Node légère servant API + statique
 # ─────────────────────────────────────────────────────────────────
 
 # ─── Stage commun d'installation des dépendances ────────────────
@@ -28,15 +29,34 @@ COPY apps/backend apps/backend
 RUN npm run prisma:generate -w apps/backend
 RUN npm run build -w apps/backend
 
-# ─── Stage 3 : image finale de production ───────────────────────
+# ─── Stage 3 : dépendances d'exécution seules ───────────────────
+# L'arbre complet des dépendances pèse ~267 Mo : TypeScript, Vite, React,
+# Tailwind… Rien de tout cela ne sert à l'exécution — le frontend est déjà
+# bundlé en JS statique. On réinstalle donc le seul workspace backend, sans
+# devDependencies (~84 Mo), ce qui allège d'autant la plus grosse couche de
+# l'image finale et son export.
+# La CLI Prisma est déclarée en dépendance de production du backend : elle est
+# nécessaire au `prisma migrate deploy` exécuté au démarrage du conteneur.
+FROM node:20-alpine AS prod-deps
+RUN apk add --no-cache openssl python3 make g++
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY apps/backend/package.json apps/backend/
+RUN npm install --omit=dev --workspace apps/backend --include-workspace-root \
+ && npm cache clean --force
+# Le client Prisma doit être régénéré dans cet arbre-ci.
+COPY apps/backend/prisma apps/backend/prisma
+RUN npx prisma generate --schema apps/backend/prisma/schema.prisma
+
+# ─── Stage 4 : image finale de production ───────────────────────
 FROM node:20-alpine AS final
 RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Dépendances (inclut la CLI Prisma pour `migrate deploy` au démarrage)
-COPY --from=build-backend /app/node_modules ./node_modules
-COPY --from=build-backend /app/package.json ./package.json
+# Dépendances d'exécution (inclut la CLI Prisma pour `migrate deploy`)
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=prod-deps /app/package.json ./package.json
 
 # Backend compilé + Prisma
 COPY --from=build-backend /app/apps/backend/dist ./apps/backend/dist
