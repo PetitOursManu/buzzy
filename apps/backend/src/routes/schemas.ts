@@ -19,6 +19,10 @@ export const listModelsSchema = z.object({
   baseUrl: z.string().url('URL de base invalide.'),
   // Si vide, on réutilise la clé déjà enregistrée.
   apiKey: z.string().max(500).optional(),
+  // Si fourni, un appel de génération minimal vérifie que la clé est
+  // réellement acceptée : lister les modèles ne prouve rien, ce catalogue
+  // étant public chez plusieurs fournisseurs.
+  model: z.string().max(200).optional(),
 });
 
 export const changePasswordSchema = z.object({

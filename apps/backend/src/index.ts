@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { env, isProduction, auditEnvironment } from './lib/env';
 import { prisma } from './lib/prisma';
-import { APP_VERSION } from './lib/version';
+import { APP_VERSION, BUILD_INFO } from './lib/version';
 import { ensureAdminUser, ensureSeededMcpServers } from './seed';
 
 import authRoutes from './routes/auth';
@@ -47,8 +47,8 @@ async function main() {
     return res.status(database ? 200 : 503).json({
       status: database ? 'ok' : 'degraded',
       name: 'buzzy',
-      version: APP_VERSION,
       database,
+      ...BUILD_INFO,
     });
   });
 
@@ -112,7 +112,10 @@ async function main() {
 
   app.listen(env.PORT, () => {
     console.log(
-      `🐝 Buzzy v${APP_VERSION} en écoute sur le port ${env.PORT} (${isProduction ? 'production' : 'dev'})`,
+      `🐝 Buzzy v${APP_VERSION}` +
+        (BUILD_INFO.commit ? ` (${BUILD_INFO.commit})` : '') +
+        (BUILD_INFO.builtAt ? ` buildé le ${BUILD_INFO.builtAt}` : '') +
+        ` en écoute sur le port ${env.PORT} (${isProduction ? 'production' : 'dev'})`,
     );
   });
 }

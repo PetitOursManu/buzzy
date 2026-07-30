@@ -18,6 +18,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Coolify expose SOURCE_COMMIT ; ailleurs, définissez BUZZY_BUILD_SHA.
+        BUILD_SHA: ${BUZZY_BUILD_SHA:-${SOURCE_COMMIT:-}}
     restart: unless-stopped
     depends_on:
       db:

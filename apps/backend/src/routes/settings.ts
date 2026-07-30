@@ -12,9 +12,9 @@ import {
   mcpServerCreateSchema,
   mcpServerUpdateSchema,
 } from './schemas';
-import { listModels, AiRequestError } from '../services/ai-provider.service';
+import { chatCompletion, listModels, AiRequestError } from '../services/ai-provider.service';
 import { testMcpServer } from '../services/mcp.service';
-import { APP_VERSION } from '../lib/version';
+import { BUILD_INFO } from '../lib/version';
 
 const router = Router();
 router.use(requireAuth);
@@ -56,7 +56,8 @@ router.get('/diagnostics', async (_req, res) => {
   );
 
   return res.json({
-    version: APP_VERSION,
+    version: BUILD_INFO.version,
+    build: BUILD_INFO,
     ai: {
       configured: !!provider,
       baseUrl: provider?.baseUrl ?? null,
@@ -190,7 +191,11 @@ router.put('/ai-provider', validate(aiProviderSchema), async (req, res) => {
 });
 
 router.post('/ai-provider/list-models', validate(listModelsSchema), async (req, res) => {
-  const { baseUrl, apiKey } = req.body as { baseUrl: string; apiKey?: string };
+  const { baseUrl, apiKey, model } = req.body as {
+    baseUrl: string;
+    apiKey?: string;
+    model?: string;
+  };
   // Si aucune clé fournie, réutiliser celle enregistrée.
   let key = apiKey?.trim() ?? '';
   if (!key) {
@@ -212,7 +217,29 @@ router.post('/ai-provider/list-models', validate(listModelsSchema), async (req, 
         warning: 'Aucun modèle listé par le fournisseur.',
       });
     }
-    return res.json({ models, baseUrl: resolvedBaseUrl });
+    // Lister les modèles ne prouve PAS que la clé est valide : chez OpenRouter
+    // et d'autres, GET /models est public. « Connexion réussie » s'affichait
+    // donc sans clé — et l'utilisateur ne découvrait le problème qu'à la
+    // première génération, sous la forme d'une erreur obscure.
+    // Une génération d'un seul jeton tranche, pour un coût négligeable.
+    let keyCheck: { ok: boolean; error?: string } | undefined;
+    if (model?.trim()) {
+      try {
+        await chatCompletion(
+          { baseUrl: resolvedBaseUrl, apiKey: key, model: model.trim(), reasoningEffort: null },
+          { messages: [{ role: 'user', content: 'ping' }], maxTokens: 1, temperature: 0 },
+        );
+        keyCheck = { ok: true };
+      } catch (probe) {
+        keyCheck = {
+          ok: false,
+          error: probe instanceof Error ? probe.message : 'Vérification impossible.',
+        };
+        console.warn(`[test IA] génération refusée avec ${model} : ${keyCheck.error}`);
+      }
+    }
+
+    return res.json({ models, baseUrl: resolvedBaseUrl, keyCheck });
   } catch (e) {
     const message =
       e instanceof AiRequestError

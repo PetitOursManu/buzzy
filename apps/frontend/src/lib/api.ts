@@ -100,14 +100,17 @@ export const settingsApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
-  listModels: (baseUrl: string, apiKey?: string) =>
-    request<{ models: ModelInfo[]; baseUrl: string; warning?: string }>(
-      '/settings/ai-provider/list-models',
-      {
-        method: 'POST',
-        body: JSON.stringify({ baseUrl, apiKey }),
-      },
-    ),
+  /** `model` déclenche une génération d'un jeton, seule preuve que la clé passe. */
+  listModels: (baseUrl: string, apiKey?: string, model?: string) =>
+    request<{
+      models: ModelInfo[];
+      baseUrl: string;
+      warning?: string;
+      keyCheck?: { ok: boolean; error?: string };
+    }>('/settings/ai-provider/list-models', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl, apiKey, model }),
+    }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: boolean }>('/settings/password', {

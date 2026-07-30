@@ -110,6 +110,8 @@ export interface ModelInfo {
 /** État de santé fonctionnel de l'installation (Paramètres → Diagnostic). */
 export interface Diagnostics {
   version: string;
+  /** Empreinte du build : permet de confirmer qu'un redéploiement a pris. */
+  build?: { version: string; commit: string; builtAt: string; startedAt: string };
   ai: {
     configured: boolean;
     baseUrl: string | null;

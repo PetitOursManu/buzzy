@@ -23,4 +23,35 @@ function readVersion(): string {
   return '0.0.0';
 }
 
+/** Horodatage gravé dans l'image par le Dockerfile. Absent hors conteneur. */
+function readBuildTimestamp(): string {
+  if (process.env.BUZZY_BUILT_AT) return process.env.BUZZY_BUILT_AT;
+  try {
+    return fs.readFileSync('/app/.build-info', 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
 export const APP_VERSION = readVersion();
+
+/**
+ * Empreinte du build déployé.
+ *
+ * `version` seule ne bouge pas d'un commit à l'autre : impossible de savoir si
+ * un redéploiement a effectivement pris. Le commit et l'horodatage de build
+ * répondent à « le correctif est-il vraiment en ligne ? », première question
+ * de tout dépannage à distance.
+ */
+export const BUILD_INFO = {
+  version: APP_VERSION,
+  // Coolify expose SOURCE_COMMIT ; les autres plateformes leur équivalent.
+  commit: (
+    process.env.BUZZY_BUILD_SHA ||
+    process.env.SOURCE_COMMIT ||
+    process.env.GIT_COMMIT ||
+    ''
+  ).slice(0, 12),
+  builtAt: readBuildTimestamp(),
+  startedAt: new Date().toISOString(),
+};

@@ -33,6 +33,7 @@ export function AiTab() {
   const [selectedModel, setSelectedModel] = useState('');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('none');
+  const [keyCheck, setKeyCheck] = useState<{ ok: boolean; error?: string } | null>(null);
 
   useEffect(() => {
     const p = providerQuery.data;
@@ -52,7 +53,8 @@ export function AiTab() {
   const toolsCapable = toolsKnown.filter((m) => m.supportsTools);
 
   const listModels = useMutation({
-    mutationFn: () => settingsApi.listModels(baseUrl, apiKey || undefined),
+    mutationFn: () =>
+      settingsApi.listModels(baseUrl, apiKey || undefined, selectedModel.trim() || undefined),
     onSuccess: (data) => {
       setModels(data.models);
       // Adopte l'URL de base qui a réellement fonctionné (ex : ajout auto de /v1).
@@ -63,8 +65,17 @@ export function AiTab() {
       if (data.models.length === 0) {
         toast(data.warning ?? "Aucun modèle listé. Saisissez son identifiant à la main.", 'info');
       } else {
-        toast(`Connexion réussie — ${data.models.length} modèle(s) disponible(s).`, 'success');
+        toast(`${data.models.length} modèle(s) disponible(s).`, 'success');
         if (!selectedModel && data.models[0]) setSelectedModel(data.models[0].id);
+      }
+
+      // Le catalogue /models est public chez plusieurs fournisseurs : seul un
+      // véritable appel de génération prouve que la clé est acceptée.
+      setKeyCheck(data.keyCheck ?? null);
+      if (data.keyCheck?.ok) {
+        toast('Clé API validée par une génération réelle.', 'success');
+      } else if (data.keyCheck) {
+        toast('Les modèles sont listés, mais la génération est refusée.', 'error');
       }
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Connexion impossible.', 'error'),
@@ -158,7 +169,7 @@ export function AiTab() {
           />
         </Field>
 
-        <div>
+        <div className="flex flex-col gap-3">
           <Button
             variant="secondary"
             icon="network"
@@ -166,8 +177,31 @@ export function AiTab() {
             loading={listModels.isPending}
             disabled={!baseUrl}
           >
-            Tester la connexion et lister les modèles
+            {selectedModel.trim()
+              ? 'Tester la connexion et la clé'
+              : 'Tester la connexion et lister les modèles'}
           </Button>
+
+          {keyCheck?.ok && (
+            <Alert tone="success" title="Clé API validée">
+              Une génération réelle a abouti : la configuration est fonctionnelle.
+            </Alert>
+          )}
+          {keyCheck && !keyCheck.ok && (
+            <Alert tone="danger" title="La génération est refusée">
+              <p>{keyCheck.error}</p>
+              <p className="mt-1.5">
+                Lister les modèles ne prouve rien : ce catalogue est public chez plusieurs
+                fournisseurs. C'est ce test-ci qui compte.
+              </p>
+            </Alert>
+          )}
+          {!keyCheck && !selectedModel.trim() && (
+            <p className="text-xs text-content-muted">
+              Renseignez un modèle ci-dessous pour que le test vérifie aussi la clé API par une
+              génération réelle.
+            </p>
+          )}
         </div>
 
         <Field

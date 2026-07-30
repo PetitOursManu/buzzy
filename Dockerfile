@@ -75,6 +75,14 @@ COPY --from=build-frontend /app/apps/frontend/dist ./apps/backend/public
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Empreinte du build : permet de vérifier qu'un redéploiement a bien pris.
+# BUILD_SHA est facultatif ; l'horodatage, lui, est toujours renseigné.
+ARG BUILD_SHA=""
+ENV BUZZY_BUILD_SHA=$BUILD_SHA
+# `ENV` ne peut pas recevoir le résultat d'un `RUN` : on passe par un fichier,
+# lu au démarrage par lib/version.ts.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build-info
+
 EXPOSE 3000
 WORKDIR /app/apps/backend
 ENTRYPOINT ["docker-entrypoint.sh"]

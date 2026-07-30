@@ -160,7 +160,11 @@ export function DiagnosticsTab({ onGoToTab }: { onGoToTab: (tab: string) => void
           </Button>
         </div>
         <p className="text-xs text-content-muted">
-          Buzzy v{d.version} · {d.content.events} événement(s) · {d.content.calendars} calendrier(s)
+          Buzzy v{d.version}
+          {d.build?.commit && <> · commit {d.build.commit}</>}
+          {d.build?.builtAt && <> · buildé le {new Date(d.build.builtAt).toLocaleString('fr-FR')}</>}
+          {' · '}
+          {d.content.events} événement(s) · {d.content.calendars} calendrier(s)
         </p>
       </Card>
 
