@@ -1,6 +1,7 @@
 import type {
   AiProviderInfo,
   DateTarget,
+  Diagnostics,
   EventItem,
   EventScope,
   Frequency,
@@ -9,6 +10,7 @@ import type {
   Network,
   PostItem,
   PostPlan,
+  PostStatus,
   UserProfileInfo,
 } from './types';
 
@@ -22,15 +24,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Session expirée.
+ *
+ * Le jeton vit 7 jours : un onglet resté ouvert finit par voir toutes ses
+ * requêtes tomber en 401. Sans ce relais, l'application affichait des erreurs
+ * en cascade sans jamais ramener vers l'écran de connexion.
+ */
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  onUnauthorized = handler;
+}
+
+/** Routes dont un 401 est une réponse normale, pas une session perdue. */
+const AUTH_ROUTES = ['/auth/me', '/auth/login', '/auth/logout'];
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
+    ...options,
+    // Après `...options`, jamais avant : un appelant ne doit pas pouvoir
+    // désactiver l'envoi du cookie de session par inadvertance.
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers ?? {}),
     },
-    ...options,
   });
+
+  if (res.status === 401 && !AUTH_ROUTES.includes(path)) {
+    onUnauthorized?.();
+  }
 
   if (res.status === 204) return undefined as T;
 
@@ -61,6 +86,8 @@ export const authApi = {
 
 /* ─── Settings ─────────────────────────────────────────────────── */
 export const settingsApi = {
+  getDiagnostics: () => request<Diagnostics>('/settings/diagnostics'),
+
   getAiProvider: () => request<AiProviderInfo | null>('/settings/ai-provider'),
   saveAiProvider: (data: {
     name: string;
@@ -105,11 +132,22 @@ export const settingsApi = {
     authHeader?: string | null;
     enabled?: boolean;
     preset?: string | null;
-  }) => request<McpServerInfo>('/settings/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
+  }) =>
+    request<McpServerInfo>('/settings/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
   updateMcpServer: (
     id: string,
-    data: Partial<{ name: string; url: string; authHeader: string | null; enabled: boolean; preset: string | null }>,
-  ) => request<McpServerInfo>(`/settings/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    data: Partial<{
+      name: string;
+      url: string;
+      authHeader: string | null;
+      enabled: boolean;
+      preset: string | null;
+    }>,
+  ) =>
+    request<McpServerInfo>(`/settings/mcp-servers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteMcpServer: (id: string) =>
     request<{ ok: boolean }>(`/settings/mcp-servers/${id}`, { method: 'DELETE' }),
   testMcpServer: (id: string) =>
@@ -163,15 +201,34 @@ export const eventsApi = {
     theme?: string;
     region?: string | null;
   }) => request<EventItem>('/events/manual', { method: 'POST', body: JSON.stringify(data) }),
+  /** Édition manuelle d'un événement déjà enregistré. */
+  update: (
+    id: string,
+    data: Partial<{
+      title: string;
+      description: string;
+      eventDate: string | null;
+      eventPeriod: string | null;
+      scope: EventScope;
+      region: string | null;
+      theme: string;
+    }>,
+  ) => request<EventItem>(`/events/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (id: string) =>
+    request<{ ok: boolean; id: string; unlinkedPosts: number }>(`/events/${id}`, {
+      method: 'DELETE',
+    }),
   rephrase: (id: string) => request<EventItem>(`/events/${id}/rephrase`, { method: 'POST' }),
   deleteHistory: (exceptIds: string[]) =>
-    request<{ deleted: number }>('/events', {
+    request<{ deleted: number; unlinkedPosts: number }>('/events', {
       method: 'DELETE',
       body: JSON.stringify({ exceptIds }),
     }),
 };
 
 /* ─── Calendar ─────────────────────────────────────────────────── */
+export type ExportFormat = 'json' | 'csv' | 'ics';
+
 export const calendarApi = {
   generate: (data: {
     name?: string;
@@ -215,10 +272,11 @@ export const calendarApi = {
     }),
   list: () => request<PostPlan[]>('/calendar'),
   get: (id: string) => request<PostPlan>(`/calendar/${id}`),
-  remove: (id: string) => request<{ ok: boolean; id: string }>(`/calendar/${id}`, { method: 'DELETE' }),
+  remove: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/calendar/${id}`, { method: 'DELETE' }),
   clearPosts: (id: string) =>
     request<{ deleted: number }>(`/calendar/${id}/posts`, { method: 'DELETE' }),
-  exportUrl: (id: string, format: 'json' | 'csv') => `/api/calendar/${id}/export?format=${format}`,
+  exportUrl: (id: string, format: ExportFormat) => `/api/calendar/${id}/export?format=${format}`,
 };
 
 /* ─── Posts ────────────────────────────────────────────────────── */
@@ -240,9 +298,12 @@ export const postsApi = {
       title: string;
       content: string;
       hashtags: string[];
-      status: string;
+      status: PostStatus;
       scheduledDate: string;
     }>,
   ) => request<PostItem>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  /** Duplique une publication dans le même calendrier (autre réseau / autre date). */
+  duplicate: (id: string, data: { network?: Network; scheduledDate?: string } = {}) =>
+    request<PostItem>(`/posts/${id}/duplicate`, { method: 'POST', body: JSON.stringify(data) }),
   regenerate: (id: string) => request<PostItem>(`/posts/${id}/regenerate`, { method: 'POST' }),
 };

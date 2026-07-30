@@ -1,9 +1,26 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { settingsApi, ApiError } from '../../lib/api';
-import { Field, GlassPanel, Spinner } from '../../components/ui';
+import { Alert, Button, Card, Field, Input } from '../../components/ui';
 import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../hooks/useAuth';
+
+/** Estimation grossière de la robustesse, à titre indicatif seulement. */
+function strengthOf(password: string): { score: 0 | 1 | 2 | 3; label: string; className: string } {
+  if (password.length === 0) return { score: 0, label: '', className: '' };
+  let points = 0;
+  if (password.length >= 12) points++;
+  if (password.length >= 16) points++;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) points++;
+  if (/\d/.test(password)) points++;
+  if (/[^A-Za-z0-9]/.test(password)) points++;
+
+  if (password.length < 8 || points <= 1) {
+    return { score: 1, label: 'Faible', className: 'text-danger' };
+  }
+  if (points <= 3) return { score: 2, label: 'Correct', className: 'text-warning' };
+  return { score: 3, label: 'Solide', className: 'text-success' };
+}
 
 export function AccountTab() {
   const { toast } = useToast();
@@ -11,16 +28,18 @@ export function AccountTab() {
 
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
-  const [confirm, setConfirm] = useState('');
+  const [confirmValue, setConfirmValue] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const strength = strengthOf(next);
 
   const change = useMutation({
     mutationFn: () => settingsApi.changePassword(current, next),
     onSuccess: () => {
-      toast('Mot de passe modifié avec succès.', 'success');
+      toast('Mot de passe modifié.', 'success');
       setCurrent('');
       setNext('');
-      setConfirm('');
+      setConfirmValue('');
       setError(null);
     },
     onError: (e) => {
@@ -36,70 +55,93 @@ export function AccountTab() {
       setError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
       return;
     }
-    if (next !== confirm) {
+    if (next !== confirmValue) {
       setError('La confirmation ne correspond pas au nouveau mot de passe.');
       return;
     }
     change.mutate();
   };
 
+  const canSubmit = !!current && !!next && !!confirmValue;
+
   return (
-    <GlassPanel className="flex flex-col gap-5 max-w-2xl">
-      <div>
-        <h2 className="text-xl font-display font-semibold">Compte & sécurité</h2>
-        <p className="text-secondary text-sm mt-1">
-          Modifiez le mot de passe du compte{user?.email ? ` ${user.email}` : ''}.
-        </p>
-      </div>
-
-      <Field label="Mot de passe actuel">
-        <input
-          type="password"
-          className="glass-input"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          autoComplete="current-password"
-        />
-      </Field>
-
-      <Field label="Nouveau mot de passe" hint="Au moins 8 caractères.">
-        <input
-          type="password"
-          className="glass-input"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          autoComplete="new-password"
-        />
-      </Field>
-
-      <Field label="Confirmer le nouveau mot de passe">
-        <input
-          type="password"
-          className="glass-input"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-          }}
-        />
-      </Field>
-
-      {error && (
-        <div className="text-sm text-red-500 bg-red-500/10 rounded-lg px-3 py-2" role="alert">
-          {error}
+    <div className="flex max-w-2xl flex-col gap-4">
+      <Card className="flex flex-col gap-5">
+        <div>
+          <h2 className="font-display text-lg">Compte & sécurité</h2>
+          <p className="mt-1 text-sm text-content-2">
+            Modifiez le mot de passe du compte{' '}
+            <strong className="font-medium">{user?.email}</strong>.
+          </p>
         </div>
-      )}
 
-      <div>
-        <button
-          className="btn-primary flex items-center gap-2"
-          onClick={submit}
-          disabled={change.isPending || !current || !next || !confirm}
+        <Field label="Mot de passe actuel">
+          <Input
+            type="password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            autoComplete="current-password"
+          />
+        </Field>
+
+        <Field
+          label="Nouveau mot de passe"
+          hint={
+            strength.label ? (
+              <>
+                Robustesse : <span className={strength.className}>{strength.label}</span>
+              </>
+            ) : (
+              'Au moins 8 caractères. Une phrase longue vaut mieux qu’un mot compliqué.'
+            )
+          }
         >
-          {change.isPending ? <Spinner /> : '🔒'} Changer le mot de passe
-        </button>
-      </div>
-    </GlassPanel>
+          <Input
+            type="password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            autoComplete="new-password"
+          />
+        </Field>
+
+        <Field
+          label="Confirmer le nouveau mot de passe"
+          error={
+            confirmValue && next !== confirmValue ? 'Les deux saisies diffèrent.' : undefined
+          }
+        >
+          <Input
+            type="password"
+            value={confirmValue}
+            onChange={(e) => setConfirmValue(e.target.value)}
+            autoComplete="new-password"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canSubmit) submit();
+            }}
+          />
+        </Field>
+
+        {error && <Alert tone="danger">{error}</Alert>}
+
+        <div className="border-t border-line pt-4">
+          <Button
+            variant="primary"
+            icon="lock"
+            onClick={submit}
+            loading={change.isPending}
+            disabled={!canSubmit}
+          >
+            Changer le mot de passe
+          </Button>
+        </div>
+      </Card>
+
+      <Alert tone="info" title="Comment Buzzy protège votre compte">
+        Le mot de passe est haché en <strong>argon2id</strong> — il n'est jamais stocké en clair. La
+        session repose sur un cookie <code className="font-mono text-xs">httpOnly</code>,
+        inaccessible au JavaScript de la page, valable 7 jours. La clé API de votre fournisseur IA
+        est chiffrée en base en <strong>AES-256-GCM</strong> et n'est jamais renvoyée au navigateur.
+      </Alert>
+    </div>
   );
 }

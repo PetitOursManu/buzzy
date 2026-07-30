@@ -2,44 +2,125 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Variables de thème (glassmorphism clair & sombre) ─────────── */
+/* ═══════════════════════════════════════════════════════════════════
+   Buzzy — jetons de design
+   ═══════════════════════════════════════════════════════════════════
+
+   Deux thèmes conçus séparément (et non l'un inversé de l'autre) :
+   le clair est chaud et papier, le sombre est un brun-noir profond qui
+   met le miel en valeur sans le faire vibrer.
+
+   Les couleurs de marque existent en deux variantes :
+     --brand        surface pleine (fond de bouton)
+     --brand-text   même teinte, assombrie/éclaircie pour rester lisible
+                    en TEXTE sur le fond de la page
+   Confondre les deux est la cause n°1 des contrastes ratés.
+   ═══════════════════════════════════════════════════════════════════ */
+
 :root {
-  --bg-base: #f4f1ff;
-  --bg-gradient-1: #ffd8a8;
-  --bg-gradient-2: #ffb0b0;
-  --bg-gradient-3: #b8a8ff;
-  --text-primary: #1a1830;
-  --text-secondary: #4a4766;
-  --text-muted: #7a7694;
+  color-scheme: light;
 
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.6);
-  --glass-shadow: 0 8px 32px rgba(31, 20, 60, 0.12);
+  /* Surfaces */
+  --bg: #faf8f5;
+  --bg-accent: #f3eee6;
+  --surface: #ffffff;
+  --surface-2: #f6f3ef;
+  --surface-3: #ece7e0;
+  --border: #e6e0d7;
+  --border-strong: #d3cabd;
 
-  --honey: #ff9500;
-  --honey-2: #ff7a45;
-  --grape: #6c5ce7;
+  /* Texte */
+  --text: #1b1917;
+  --text-2: #57524c;
+  --text-3: #857d74;
+  --text-on-brand: #2a1a05;
+
+  /* Marque */
+  --brand: #f59e0b;
+  --brand-hover: #e08c05;
+  --brand-text: #a35c05;
+  --brand-soft: #fdf3dd;
+  --brand-ring: rgba(245, 158, 11, 0.35);
+
+  --accent: #6d5ae0;
+  --accent-text: #5b48cc;
+  --accent-soft: #eeeaff;
+  --accent-ring: rgba(109, 90, 224, 0.3);
+
+  /* Sémantique */
+  --success: #0f9d63;
+  --success-soft: #e3f7ee;
+  --warning: #c2740a;
+  --warning-soft: #fdf1de;
+  --danger: #d4342c;
+  --danger-soft: #fdeceb;
+  --info: #2b6ed9;
+  --info-soft: #e8f1fd;
+
+  /* Élévation — discrète en clair, la couleur porte la hiérarchie */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.06);
+  --shadow-md: 0 2px 4px rgba(28, 25, 23, 0.05), 0 6px 16px -6px rgba(28, 25, 23, 0.1);
+  --shadow-lg: 0 4px 8px rgba(28, 25, 23, 0.06), 0 16px 40px -12px rgba(28, 25, 23, 0.16);
+
+  /* Rayons */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  /* Typographie — pile système : aucun appel réseau, rendu immédiat,
+     et un aspect natif sur chaque plateforme. Une application
+     auto-hébergée ne doit pas dépendre d'un CDN de polices. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    'Noto Sans', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
 }
 
 .dark {
-  --bg-base: #0b0f19;
-  --bg-gradient-1: #3a2410;
-  --bg-gradient-2: #3a1420;
-  --bg-gradient-3: #1e1a45;
-  --text-primary: #f2f0ff;
-  --text-secondary: #c3c0dc;
-  --text-muted: #8b88a8;
+  color-scheme: dark;
 
-  --glass-bg: rgba(26, 24, 44, 0.55);
-  --glass-bg-strong: rgba(26, 24, 44, 0.78);
-  --glass-border: rgba(255, 255, 255, 0.12);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --bg: #14120f;
+  --bg-accent: #1b1814;
+  --surface: #1d1a16;
+  --surface-2: #26221d;
+  --surface-3: #302a24;
+  --border: #332e28;
+  --border-strong: #4a4239;
 
-  --honey: #ffb020;
-  --honey-2: #ff7a45;
-  --grape: #8b7cf0;
+  --text: #f6f3ef;
+  --text-2: #b9b1a6;
+  --text-3: #8b8378;
+  --text-on-brand: #2a1a05;
+
+  --brand: #f0a624;
+  --brand-hover: #f7b13a;
+  --brand-text: #f3b350;
+  --brand-soft: #2e2210;
+  --brand-ring: rgba(240, 166, 36, 0.35);
+
+  --accent: #9c8bf5;
+  --accent-text: #b3a5ff;
+  --accent-soft: #241f3d;
+  --accent-ring: rgba(156, 139, 245, 0.3);
+
+  --success: #34c48a;
+  --success-soft: #10291f;
+  --warning: #e0a13c;
+  --warning-soft: #2c2110;
+  --danger: #f0736b;
+  --danger-soft: #331715;
+  --info: #6ba3f3;
+  --info-soft: #12203a;
+
+  /* En sombre, une ombre noire est invisible : l'élévation passe par des
+     ombres plus profondes ET une bordure plus claire sur les surfaces. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 20px -8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 6px 16px rgba(0, 0, 0, 0.5), 0 24px 48px -16px rgba(0, 0, 0, 0.7);
 }
+
+/* ─── Base ──────────────────────────────────────────────────────── */
 
 * {
   box-sizing: border-box;
@@ -53,264 +134,156 @@ body,
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
-  background-color: var(--bg-base);
-  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  background-color: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
-  transition: background-color 0.4s ease, color 0.4s ease;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
+/* Le titrage se distingue par la graisse et le resserrement optique,
+   pas par une seconde famille téléchargée. */
 h1,
 h2,
 h3,
+h4,
 .font-display {
-  font-family: 'Space Grotesk', 'Sora', system-ui, sans-serif;
+  font-family: var(--font-sans);
+  font-weight: 650;
+  letter-spacing: -0.021em;
+  line-height: 1.2;
 }
 
-/* ─── Fond avec blobs animés ────────────────────────────────────── */
-.bg-blobs {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  background: var(--bg-base);
+h1 {
+  letter-spacing: -0.028em;
 }
 
-.bg-blobs::before,
-.bg-blobs::after,
-.bg-blobs > span {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--brand-ring);
+  color: var(--text);
+}
+
+/* Focus visible homogène sur toute l'application. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Scrollbar discrète, accordée au thème. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}
+
+/* Champs natifs : on aligne le rendu du sélecteur de date et des listes
+   déroulantes sur le thème courant. */
+input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}
+.dark input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
   opacity: 0.6;
 }
 
-.bg-blobs::before {
-  width: 45vw;
-  height: 45vw;
-  background: var(--bg-gradient-1);
-  top: -10%;
-  left: -5%;
-  animation: blob-move 22s ease-in-out infinite;
+/* ─── Voile de marque du fond ───────────────────────────────────── */
+/* Un dégradé fixe et immobile remplace les « blobs » animés : même
+   chaleur, sans animation permanente ni coût de rendu continu. */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, var(--brand-soft) 0%, transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, var(--accent-soft) 0%, transparent 55%),
+    var(--bg);
 }
 
-.bg-blobs::after {
-  width: 40vw;
-  height: 40vw;
-  background: var(--bg-gradient-2);
-  bottom: -15%;
-  right: -10%;
-  animation: blob-move 28s ease-in-out infinite reverse;
-}
+/* ─── Squelettes de chargement ──────────────────────────────────── */
 
-.bg-blobs > span {
-  width: 35vw;
-  height: 35vw;
-  background: var(--bg-gradient-3);
-  top: 30%;
-  left: 40%;
-  animation: blob-move 25s ease-in-out infinite;
-}
-
-@keyframes blob-move {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  33% {
-    transform: translate(4vw, -6vw) scale(1.12);
-  }
-  66% {
-    transform: translate(-3vw, 3vw) scale(0.92);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bg-blobs::before,
-  .bg-blobs::after,
-  .bg-blobs > span {
-    animation: none;
-  }
-}
-
-/* ─── Composants verre réutilisables ───────────────────────────── */
-@layer components {
-  .glass {
-    background: var(--glass-bg);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
-  }
-
-  .glass-strong {
-    background: var(--glass-bg-strong);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
-  }
-
-  .glass-input {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    color: var(--text-primary);
-    border-radius: 0.75rem;
-    padding: 0.6rem 0.9rem;
-    width: 100%;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .glass-input::placeholder {
-    color: var(--text-muted);
-  }
-  .glass-input:focus {
-    border-color: var(--honey);
-    box-shadow: 0 0 0 3px rgba(255, 176, 32, 0.25);
-  }
-
-  .btn-primary {
-    background: linear-gradient(135deg, var(--honey), var(--honey-2));
-    color: #1a1206;
-    font-weight: 600;
-    border-radius: 0.75rem;
-    padding: 0.6rem 1.2rem;
-    border: none;
-    cursor: pointer;
-    transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
-  }
-  .btn-primary:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 24px -6px rgba(255, 122, 69, 0.6);
-  }
-  .btn-primary:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .btn-ghost {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    color: var(--text-primary);
-    border-radius: 0.75rem;
-    padding: 0.55rem 1.1rem;
-    cursor: pointer;
-    transition: transform 0.15s, border-color 0.2s;
-  }
-  .btn-ghost:hover:not(:disabled) {
-    transform: translateY(-1px);
-    border-color: var(--honey);
-  }
-  .btn-ghost:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .text-secondary {
-    color: var(--text-secondary);
-  }
-  .text-muted {
-    color: var(--text-muted);
-  }
-
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    border: 1px solid var(--glass-border);
-    background: var(--glass-bg);
-  }
-
-  /* ─── Gros « tags » de sélection (page Découverte) ───────────── */
-  .opt-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.6rem 1.15rem;
-    border-radius: 1rem;
-    font-size: 0.92rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    border: 1.5px solid var(--glass-border);
-    background: var(--glass-bg);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: transform 0.16s ease, border-color 0.2s, box-shadow 0.2s, background 0.2s,
-      color 0.2s;
-  }
-  .opt-tag:hover:not(:disabled) {
-    transform: translateY(-2px);
-    border-color: var(--honey);
-    color: var(--text-primary);
-  }
-  .opt-tag--active {
-    background: linear-gradient(135deg, var(--honey), var(--honey-2));
-    color: #1a1206;
-    border-color: transparent;
-    box-shadow: 0 8px 22px -8px rgba(255, 122, 69, 0.65);
-  }
-  .opt-tag--active:hover:not(:disabled) {
-    color: #1a1206;
-  }
-  .opt-tag--priority {
-    background: linear-gradient(135deg, var(--grape), #8b7cf0);
-    color: #fff;
-    border-color: transparent;
-    box-shadow: 0 8px 22px -8px rgba(108, 92, 231, 0.7);
-  }
-  .opt-tag--priority:hover:not(:disabled) {
-    color: #fff;
-  }
-  .opt-tag__badge {
-    font-size: 0.72rem;
-    font-weight: 700;
-    opacity: 0.85;
-    padding-left: 0.15rem;
-  }
-}
-
-/* ─── Effet shimmer (squelettes de chargement) ─────────────────── */
-.shimmer {
+.skeleton {
   position: relative;
   overflow: hidden;
-  background: var(--glass-bg);
+  background: var(--surface-2);
 }
-.shimmer::after {
+.skeleton::after {
   content: '';
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.25),
-    transparent
-  );
-  animation: shimmer 1.6s infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: skeleton-sweep 1.5s infinite;
 }
-@keyframes shimmer {
+.dark .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
+@keyframes skeleton-sweep {
   100% {
     transform: translateX(100%);
   }
 }
 
-/* Focus visible accessible partout */
-:focus-visible {
-  outline: 2px solid var(--honey);
-  outline-offset: 2px;
+/* ─── Utilitaires ───────────────────────────────────────────────── */
+
+@layer utilities {
+  /* Troncature multi-lignes : line-clamp natif de Tailwind 3.3+, redéfini
+     ici pour rester indépendant de la version du plugin. */
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Barre de défilement masquée, défilement conservé (onglets mobiles). */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-/* Scrollbar discrète */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 999px;
+/* ─── Mouvement réduit ──────────────────────────────────────────── */
+/* Respecte le réglage système : plus aucune animation décorative. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

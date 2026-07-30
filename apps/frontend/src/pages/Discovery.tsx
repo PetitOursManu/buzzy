@@ -6,17 +6,28 @@ import { calendarApi, eventsApi, ApiError } from '../lib/api';
 import type { DateTarget, EventItem, EventScope, PostPlan } from '../lib/types';
 import { SCOPES, THEMES } from '../lib/constants';
 import { EventCard } from '../components/EventCard';
-import { ManualEventModal } from '../components/ManualEventModal';
+import { EventFormModal } from '../components/EventFormModal';
+import { Icon } from '../components/icons';
 import {
+  Alert,
+  Button,
+  Card,
   CardSkeleton,
+  Checkbox,
   EmptyState,
   Field,
-  GlassPanel,
+  IconButton,
+  Input,
   Modal,
   MultiInput,
-  Spinner,
+  PageHeader,
+  SectionTitle,
+  SegmentedControl,
+  Select,
+  Tag,
 } from '../components/ui';
 import { useToast } from '../hooks/useToast';
+import { useConfirm } from '../hooks/useConfirm';
 import { useSelection } from '../hooks/useSelection';
 import { usePersistentState } from '../hooks/usePersistentState';
 
@@ -24,15 +35,10 @@ type DateMode = 'month' | 'date' | 'range';
 
 const now = new Date();
 const MAX_PRIORITY = 2;
+const HISTORY_PAGE = 24;
 
-const SCOPE_ICON: Record<EventScope, string> = {
-  GLOBAL: '🌍',
-  NATIONAL: '🏳️',
-  REGIONAL: '🗺️',
-  LOCAL: '📍',
-};
+/* ─── Tri chronologique ────────────────────────────────────────── */
 
-// Tri chronologique des événements (eventDate, sinon eventPeriod ; sans date = à la fin).
 const MONTH_INDEX: Record<string, number> = {
   janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
   juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
@@ -60,8 +66,7 @@ function eventTime(e: EventItem): number {
     const t = new Date(e.eventDate).getTime();
     if (!isNaN(t)) return t;
   }
-  const pt = periodToTime(e.eventPeriod);
-  return pt ?? Number.POSITIVE_INFINITY;
+  return periodToTime(e.eventPeriod) ?? Number.POSITIVE_INFINITY;
 }
 
 type SortMode = 'date-asc' | 'date-desc' | 'theme' | 'scope' | 'title' | 'verified';
@@ -72,7 +77,7 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: 'theme', label: 'Thème (A→Z)' },
   { value: 'scope', label: 'Portée (Mondial→Local)' },
   { value: 'title', label: 'Titre (A→Z)' },
-  { value: 'verified', label: 'Sources vérifiées d\'abord' },
+  { value: 'verified', label: "Sources vérifiées d'abord" },
 ];
 
 const SCOPE_RANK: Record<EventScope, number> = { GLOBAL: 0, NATIONAL: 1, REGIONAL: 2, LOCAL: 3 };
@@ -95,7 +100,9 @@ function sortEvents(list: EventItem[], mode: SortMode): EventItem[] {
     case 'theme':
       return arr.sort((a, b) => a.theme.localeCompare(b.theme, 'fr'));
     case 'scope':
-      return arr.sort((a, b) => SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || eventTime(a) - eventTime(b));
+      return arr.sort(
+        (a, b) => SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope] || eventTime(a) - eventTime(b),
+      );
     case 'title':
       return arr.sort((a, b) => a.title.localeCompare(b.title, 'fr'));
     case 'verified':
@@ -105,12 +112,17 @@ function sortEvents(list: EventItem[], mode: SortMode): EventItem[] {
   }
 }
 
+const GRID = 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4';
+
+/* ─── Page ─────────────────────────────────────────────────────── */
+
 export function DiscoveryPage() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const { selectedIds, toggle } = useSelection();
   const queryClient = useQueryClient();
 
-  // ─── Filtres persistants (survivent à la navigation entre pages) ───
+  /* Filtres persistants (survivent à la navigation entre pages) */
   const [scopes, setScopes] = usePersistentState<EventScope[]>('buzzy-f-scopes', ['GLOBAL']);
   const [regions, setRegions] = usePersistentState<string[]>('buzzy-f-regions', []);
   const [themes, setThemes] = usePersistentState<string[]>('buzzy-f-themes', []);
@@ -127,14 +139,29 @@ export function DiscoveryPage() {
   const [rangeStart, setRangeStart] = usePersistentState<string>('buzzy-f-rangeStart', '');
   const [rangeEnd, setRangeEnd] = usePersistentState<string>('buzzy-f-rangeEnd', '');
 
-  // ─── Résultats (non persistés) ───
+  /* Résultats (non persistés) */
   const [events, setEvents] = useState<EventItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [planText, setPlanText] = useState<string | null>(null);
 
+  /* Historique : recherche + pagination */
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE);
+
+  // Sans anti-rebond, chaque frappe déclencherait une requête serveur.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setHistoryLimit(HISTORY_PAGE);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const historyQuery = useQuery({
-    queryKey: ['events', 'history'],
-    queryFn: () => eventsApi.list({ take: 30 }),
+    queryKey: ['events', 'history', debouncedSearch, historyLimit],
+    queryFn: () => eventsApi.list({ take: historyLimit, q: debouncedSearch || undefined }),
+    placeholderData: (prev) => prev,
   });
 
   const hasLocalScope = scopes.includes('REGIONAL') || scopes.includes('LOCAL');
@@ -186,7 +213,8 @@ export function DiscoveryPage() {
     priorityThemes,
   });
 
-  // ─── Génération ───
+  /* ─── Génération ─── */
+
   const generate = useMutation({
     mutationFn: async (args: { mode: 'new' | 'more'; plan?: string }) => {
       const dateTarget = buildDateTarget();
@@ -206,10 +234,10 @@ export function DiscoveryPage() {
       queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
       if (data.notice) toast(data.notice, 'info');
     },
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Erreur lors de la génération.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Erreur lors de la génération.', 'error'),
   });
 
-  // ─── Planification ───
   const plan = useMutation({
     mutationFn: async () => {
       const dateTarget = buildDateTarget();
@@ -217,12 +245,12 @@ export function DiscoveryPage() {
       return eventsApi.plan({ ...commonPayload(), dateTarget, count: 9 });
     },
     onSuccess: (data) => setPlanText(data.plan),
-    onError: (err) => toast(err instanceof ApiError ? err.message : 'Erreur lors de la planification.', 'error'),
+    onError: (err) =>
+      toast(err instanceof ApiError ? err.message : 'Erreur lors de la planification.', 'error'),
   });
 
   const onGenerateClick = () => {
     if (planningEnabled) {
-      // Fait disparaître les anciens événements (animation de sortie) avant de planifier.
       setNotice(null);
       setEvents([]);
       plan.mutate();
@@ -240,91 +268,124 @@ export function DiscoveryPage() {
   const isFirstGen = generate.isPending && generate.variables?.mode === 'new';
   const isMoreGen = generate.isPending && generate.variables?.mode === 'more';
 
-  // Affichage trié selon le mode choisi.
   const sortedEvents = useMemo(() => sortEvents(events, sortMode), [events, sortMode]);
 
-  // Historique = événements persistés, hors ceux affichés en « nouveaux ».
   const newEventIds = useMemo(() => new Set(events.map((e) => e.id)), [events]);
   const historyEvents = useMemo(
-    () => sortEvents((historyQuery.data?.events ?? []).filter((e) => !newEventIds.has(e.id)), sortMode),
+    () =>
+      sortEvents(
+        (historyQuery.data?.events ?? []).filter((e) => !newEventIds.has(e.id)),
+        sortMode,
+      ),
     [historyQuery.data, newEventIds, sortMode],
   );
+  const historyTotal = historyQuery.data?.total ?? 0;
+  const canLoadMore = (historyQuery.data?.events.length ?? 0) < historyTotal;
+
+  /* ─── Actions sur l'historique ─── */
+
+  const invalidateEvents = () => queryClient.invalidateQueries({ queryKey: ['events'] });
 
   const deleteHistory = useMutation({
     mutationFn: () => eventsApi.deleteHistory(events.map((e) => e.id)),
     onSuccess: (r) => {
       toast(`Historique supprimé (${r.deleted} événement(s)).`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
+      if (r.unlinkedPosts > 0) {
+        toast(
+          `${r.unlinkedPosts} publication(s) conservée(s) mais détachée(s) de leur événement.`,
+          'info',
+        );
+      }
+      invalidateEvents();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
   });
 
-  const updateNewEvent = (u: EventItem) => setEvents((prev) => prev.map((e) => (e.id === u.id ? u : e)));
-  const invalidateHistory = () => queryClient.invalidateQueries({ queryKey: ['events', 'history'] });
+  const deleteEvent = useMutation({
+    mutationFn: (id: string) => eventsApi.remove(id),
+    onSuccess: (r, id) => {
+      setEvents((prev) => prev.filter((e) => e.id !== id));
+      toast(
+        r.unlinkedPosts > 0
+          ? `Événement supprimé. ${r.unlinkedPosts} publication(s) conservée(s) mais détachée(s).`
+          : 'Événement supprimé.',
+        'success',
+      );
+      invalidateEvents();
+    },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
+  });
 
-  // ─── Ajout manuel d'un événement (avec rattachement optionnel à un calendrier) ───
-  const [manualOpen, setManualOpen] = useState(false);
+  const askDeleteEvent = async (event: EventItem) => {
+    const ok = await confirm({
+      title: `Supprimer « ${event.title} » ?`,
+      message:
+        'Les publications déjà créées à partir de cet événement sont conservées, mais perdent le lien vers sa description et ses sources.',
+      confirmLabel: 'Supprimer',
+    });
+    if (ok) deleteEvent.mutate(event.id);
+  };
 
-  // ─── Calendriers existants : accès et suppression depuis la page principale ───
+  const askDeleteHistory = async () => {
+    const ok = await confirm({
+      title: "Supprimer tout l'historique ?",
+      message: `${historyTotal} événement(s) enregistré(s) seront supprimés définitivement. Les publications de vos calendriers sont conservées, mais perdent le lien vers leur événement.`,
+      confirmLabel: 'Tout supprimer',
+    });
+    if (ok) deleteHistory.mutate();
+  };
+
+  const updateNewEvent = (u: EventItem) =>
+    setEvents((prev) => prev.map((e) => (e.id === u.id ? u : e)));
+
+  /* ─── Modales ─── */
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<EventItem | null>(null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+  const openEdit = (event: EventItem) => {
+    setEditing(event);
+    setFormOpen(true);
+  };
+
+  /* ─── Calendriers existants ─── */
+
   const plansQuery = useQuery({ queryKey: ['calendar', 'list'], queryFn: calendarApi.list });
-  const deletePlan = useMutation({
-    mutationFn: (id: string) => calendarApi.remove(id),
-    onSuccess: () => {
-      toast('Calendrier supprimé.', 'success');
-      queryClient.invalidateQueries({ queryKey: ['calendar'] });
-    },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
-  });
 
   const hasSort = events.length > 0 || historyEvents.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-display font-bold">Découverte d'événements</h1>
-          <p className="text-secondary mt-1">
-            Explorez des événements mondiaux, nationaux, régionaux et locaux par thème, générés par votre IA.
-          </p>
-        </div>
-        <button
-          className="btn-primary flex items-center gap-2 text-sm"
-          onClick={() => setManualOpen(true)}
-          title="Ajoute un événement que vous connaissez déjà, sans passer par l'IA"
-        >
-          ➕ Ajouter un événement manuellement
-        </button>
-      </div>
-
-      {/* ─── Calendriers existants ─── */}
-      <CalendarBar
-        plans={plansQuery.data ?? []}
-        deletingId={deletePlan.isPending ? (deletePlan.variables as string) : null}
-        onDelete={(p) => {
-          if (confirm(`Supprimer définitivement le calendrier « ${p.name} » et ses publications ?`)) {
-            deletePlan.mutate(p.id);
-          }
-        }}
+      <PageHeader
+        title="Découverte d'événements"
+        description="Explorez les temps forts mondiaux, nationaux, régionaux et locaux par thème, puis sélectionnez ceux qui alimenteront votre calendrier éditorial."
+        actions={
+          <Button variant="secondary" icon="plus" onClick={openCreate}>
+            Ajouter un événement
+          </Button>
+        }
       />
 
+      <CalendarBar plans={plansQuery.data ?? []} />
+
       {/* ─── Filtres ─── */}
-      <GlassPanel className="flex flex-col gap-5">
-        <div className="grid md:grid-cols-2 gap-5">
+      <Card className="flex flex-col gap-5">
+        <div className="grid gap-5 lg:grid-cols-2">
           <Field label="Portée géographique" hint="Sélection multiple possible.">
-            <div className="flex flex-wrap gap-2.5">
+            <div className="flex flex-wrap gap-1.5">
               {SCOPES.map((s) => (
-                <button
+                <Tag
                   key={s.value}
-                  type="button"
+                  active={scopes.includes(s.value)}
                   onClick={() => toggleScope(s.value)}
-                  aria-pressed={scopes.includes(s.value)}
-                  className={scopes.includes(s.value) ? 'opt-tag opt-tag--active' : 'opt-tag'}
+                  icon={s.icon}
                 >
-                  <span aria-hidden className="text-base">
-                    {SCOPE_ICON[s.value]}
-                  </span>
                   {s.label}
-                </button>
+                </Tag>
               ))}
             </div>
           </Field>
@@ -333,7 +394,7 @@ export function DiscoveryPage() {
             label="Localisations (régions / villes)"
             hint={
               hasLocalScope
-                ? 'Ajoutez-en plusieurs : Entrée ou virgule pour valider chaque zone.'
+                ? 'Entrée ou virgule pour valider chaque zone.'
                 : 'Utilisé avec les portées Régional / Local.'
             }
           >
@@ -346,24 +407,17 @@ export function DiscoveryPage() {
           </Field>
         </div>
 
-        <Field label="Thèmes (multi-sélection)">
-          <div className="flex flex-wrap gap-2.5">
+        <Field label="Thèmes" hint="Multi-sélection.">
+          <div className="flex flex-wrap gap-1.5">
             {THEMES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => toggleTheme(t)}
-                aria-pressed={themes.includes(t)}
-                className={themes.includes(t) ? 'opt-tag opt-tag--active' : 'opt-tag'}
-              >
-                {themes.includes(t) && <span aria-hidden>✓</span>}
+              <Tag key={t} active={themes.includes(t)} onClick={() => toggleTheme(t)}>
                 {t}
-              </button>
+              </Tag>
             ))}
           </div>
           {themes.includes('Autre') && (
-            <input
-              className="glass-input mt-2"
+            <Input
+              className="mt-2"
               placeholder="Précisez le thème…"
               value={customTheme}
               onChange={(e) => setCustomTheme(e.target.value)}
@@ -371,30 +425,31 @@ export function DiscoveryPage() {
           )}
         </Field>
 
-        {/* ─── Thèmes prioritaires ─── */}
         {effectiveThemes.length > 0 && (
           <Field
-            label={`Thèmes prioritaires (max ${MAX_PRIORITY})`}
-            hint="Cliquez sur ⭐ pour prioriser jusqu'à deux thèmes : ils seront privilégiés lors de la génération."
+            label={`Thèmes prioritaires (max. ${MAX_PRIORITY})`}
+            hint="Les thèmes prioritaires concentreront la majorité des événements générés."
           >
-            <div className="flex flex-wrap gap-2.5">
+            <div className="flex flex-wrap gap-1.5">
               {effectiveThemes.map((t) => {
                 const isPriority = priorityThemes.includes(t);
                 return (
-                  <button
+                  <Tag
                     key={t}
-                    type="button"
+                    active={isPriority}
+                    tone="accent"
                     onClick={() => togglePriority(t)}
-                    aria-pressed={isPriority}
-                    className={
-                      isPriority ? 'opt-tag opt-tag--priority' : 'opt-tag hover:!border-[color:var(--grape)]'
+                    icon="star"
+                    badge={
+                      isPriority ? (
+                        <span className="ml-0.5 text-2xs font-bold opacity-80">
+                          #{priorityThemes.indexOf(t) + 1}
+                        </span>
+                      ) : undefined
                     }
                   >
-                    <span aria-hidden>{isPriority ? '⭐' : '☆'}</span> {t}
-                    {isPriority && (
-                      <span className="opt-tag__badge">#{priorityThemes.indexOf(t) + 1}</span>
-                    )}
-                  </button>
+                    {t}
+                  </Tag>
                 );
               })}
             </div>
@@ -402,55 +457,63 @@ export function DiscoveryPage() {
         )}
 
         <Field label="Cible temporelle">
-          <div className="flex flex-wrap gap-2 mb-3">
-            {(['month', 'date', 'range'] as DateMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setDateMode(m)}
-                className={
-                  dateMode === m ? 'btn-primary !py-1.5 !px-3 text-sm' : 'btn-ghost !py-1.5 !px-3 text-sm'
-                }
-              >
-                {m === 'month' ? 'Mois précis' : m === 'date' ? 'Date précise' : 'Période libre'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={[
+              { value: 'month', label: 'Mois précis' },
+              { value: 'date', label: 'Date précise' },
+              { value: 'range', label: 'Période libre' },
+            ]}
+            value={dateMode}
+            onChange={(v) => setDateMode(v as DateMode)}
+            ariaLabel="Type de cible temporelle"
+            className="mb-2.5"
+          />
 
           {dateMode === 'month' && (
-            <div className="flex gap-2">
-              <select className="glass-input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+            <div className="flex flex-wrap gap-2">
+              <Select
+                className="!w-auto min-w-[10rem]"
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+                aria-label="Mois"
+              >
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                   <option key={m} value={m}>
                     {new Date(2000, m - 1, 1).toLocaleDateString('fr-FR', { month: 'long' })}
                   </option>
                 ))}
-              </select>
-              <input
+              </Select>
+              <Input
                 type="number"
-                className="glass-input"
+                className="!w-28"
                 value={year}
                 min={2000}
                 max={2100}
                 onChange={(e) => setYear(Number(e.target.value))}
+                aria-label="Année"
               />
             </div>
           )}
           {dateMode === 'date' && (
-            <input type="date" className="glass-input" value={singleDate} onChange={(e) => setSingleDate(e.target.value)} />
+            <Input
+              type="date"
+              className="!w-auto"
+              value={singleDate}
+              onChange={(e) => setSingleDate(e.target.value)}
+            />
           )}
           {dateMode === 'range' && (
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
                 type="date"
-                className="glass-input"
+                className="!w-auto"
                 value={rangeStart}
                 onChange={(e) => setRangeStart(e.target.value)}
                 aria-label="Début de période"
               />
-              <input
+              <Input
                 type="date"
-                className="glass-input"
+                className="!w-auto"
                 value={rangeEnd}
                 onChange={(e) => setRangeEnd(e.target.value)}
                 aria-label="Fin de période"
@@ -459,102 +522,81 @@ export function DiscoveryPage() {
           )}
         </Field>
 
-        {/* ─── Options de fiabilité ─── */}
-        <div className="flex flex-col gap-3">
-          <label className="flex items-start gap-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={planningEnabled}
-              onChange={(e) => setPlanningEnabled(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-[color:var(--grape)]"
-            />
-            <span>
-              <span className="text-sm font-medium">Mode planification</span>
-              <span className="block text-xs text-muted">
-                L'IA propose d'abord un plan que vous validez avant de lancer — meilleures réponses.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex items-start gap-2.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={strictSources}
-              onChange={(e) => setStrictSources(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-[color:var(--honey)]"
-            />
-            <span>
-              <span className="text-sm font-medium">🔒 Mode strict — zéro invention</span>
-              <span className="block text-xs text-muted">
-                N'affiche QUE les événements dont au moins un lien source répond réellement. Les
-                événements non vérifiables sont écartés (liste plus courte, mais fiable). Recommandé
-                avec la recherche web activée.
-              </span>
-            </span>
-          </label>
+        <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface-2 p-3.5">
+          <Checkbox
+            checked={planningEnabled}
+            onChange={setPlanningEnabled}
+            tone="accent"
+            label="Mode planification"
+            hint="L'IA propose d'abord un plan que vous validez avant de lancer la recherche."
+          />
+          <Checkbox
+            checked={strictSources}
+            onChange={setStrictSources}
+            label="Mode strict — zéro invention"
+            hint="N'affiche que les événements dont au moins un lien source répond réellement. Liste plus courte, mais fiable. Recommandé avec la recherche web activée."
+          />
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="btn-primary flex items-center gap-2"
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            size="lg"
+            icon="sparkles"
             onClick={onGenerateClick}
+            loading={isFirstGen || plan.isPending}
             disabled={generate.isPending || plan.isPending}
           >
-            {isFirstGen || plan.isPending ? <Spinner /> : <span aria-hidden>✨</span>}
-            {planningEnabled ? 'Planifier & trouver' : 'Trouver les évènements'}
-          </button>
+            {planningEnabled ? 'Planifier & trouver' : 'Trouver les événements'}
+          </Button>
           {selectedIds.length > 0 && (
-            <Link to="/calendrier" className="btn-ghost flex items-center gap-2 text-sm">
-              🗓️ {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''} → Calendrier
+            <Link to="/calendrier">
+              <Button variant="secondary" icon="calendar" iconAfter="chevron-right">
+                {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''}
+              </Button>
             </Link>
           )}
         </div>
-      </GlassPanel>
+      </Card>
 
-      {notice && (
-        <div className="glass rounded-xl px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
-          ⚠️ {notice}
+      {notice && <Alert tone="warning">{notice}</Alert>}
+
+      {/* ─── Tri ─── */}
+      {!isFirstGen && !plan.isPending && hasSort && (
+        <div className="flex items-center justify-end gap-2">
+          <label htmlFor="sort-mode" className="text-[13px] text-content-muted">
+            Trier par
+          </label>
+          <Select
+            id="sort-mode"
+            className="!w-auto"
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
         </div>
       )}
 
-      {/* ─── Barre de tri ─── */}
-      {!isFirstGen && !plan.isPending && hasSort && (
-          <div className="flex items-center justify-end gap-2">
-            <label htmlFor="sort-mode" className="text-sm text-muted">
-              Trier par :
-            </label>
-            <select
-              id="sort-mode"
-              className="glass-input !w-auto !py-1.5 text-sm"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-      {/* ─── Grille de résultats ─── */}
+      {/* ─── Résultats ─── */}
       {isFirstGen ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className={GRID}>
           {Array.from({ length: 9 }).map((_, i) => (
             <CardSkeleton key={i} />
           ))}
         </div>
       ) : (
         <>
-          {/* ─── Nouveaux événements générés ─── */}
           {events.length > 0 && (
             <section className="flex flex-col gap-4">
-              <h2 className="text-lg font-display font-semibold flex items-center gap-2">
-                <span aria-hidden>✨</span> Nouveaux événements générés
-                <span className="text-sm font-normal text-muted">({events.length})</span>
-              </h2>
-              <motion.div layout className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <SectionTitle icon="sparkles" count={events.length}>
+                Nouveaux événements
+              </SectionTitle>
+              <motion.div layout className={GRID}>
                 <AnimatePresence mode="popLayout">
                   {sortedEvents.map((ev) => (
                     <EventCard
@@ -563,104 +605,166 @@ export function DiscoveryPage() {
                       selected={selectedIds.includes(ev.id)}
                       onToggleSelect={toggle}
                       onRephrased={updateNewEvent}
+                      onEdit={openEdit}
+                      onDelete={askDeleteEvent}
                     />
                   ))}
                 </AnimatePresence>
               </motion.div>
               <div className="flex justify-center">
-                <button
-                  className="btn-ghost flex items-center gap-2"
+                <Button
+                  variant="secondary"
+                  icon="plus"
                   onClick={() => generate.mutate({ mode: 'more' })}
+                  loading={isMoreGen}
                   disabled={generate.isPending}
                 >
-                  {isMoreGen ? <Spinner /> : <span aria-hidden>➕</span>}
-                  Afficher plus
-                </button>
+                  Afficher plus d'événements
+                </Button>
               </div>
             </section>
           )}
 
           {plan.isPending && events.length === 0 && (
-            <div className="glass rounded-2xl p-10 text-center flex flex-col items-center gap-3">
-              <Spinner className="h-6 w-6" />
-              <span className="text-secondary">Élaboration du plan en cours…</span>
-            </div>
+            <Card className="flex flex-col items-center gap-3 py-10 text-center">
+              <Icon name="sparkles" size={22} className="animate-pulse text-brand" />
+              <span className="text-sm text-content-2">Élaboration du plan en cours…</span>
+            </Card>
           )}
 
           {/* ─── Historique ─── */}
-          {historyQuery.isLoading && events.length === 0 ? (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <CardSkeleton key={i} />
-              ))}
-            </div>
-          ) : historyEvents.length > 0 ? (
-            <section className="flex flex-col gap-4 border-t border-[color:var(--glass-border)] pt-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-display font-semibold flex items-center gap-2 text-secondary">
-                  <span aria-hidden>🕓</span> Historique
-                  <span className="text-sm font-normal text-muted">({historyEvents.length})</span>
-                </h2>
-                <button
-                  className="btn-ghost !py-1.5 !px-3 text-sm text-red-500 flex items-center gap-1.5"
-                  onClick={() => {
-                    if (confirm('Supprimer définitivement tout l\'historique des événements générés ?')) {
-                      deleteHistory.mutate();
-                    }
-                  }}
-                  disabled={deleteHistory.isPending}
-                >
-                  {deleteHistory.isPending ? <Spinner /> : '🗑'} Supprimer l'historique
-                </button>
-              </div>
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {historyEvents.map((ev) => (
-                  <EventCard
-                    key={ev.id}
-                    event={ev}
-                    selected={selectedIds.includes(ev.id)}
-                    onToggleSelect={toggle}
-                    onRephrased={invalidateHistory}
+          <section className="flex flex-col gap-4 border-t border-line pt-6">
+            <SectionTitle
+              icon="history"
+              count={historyTotal}
+              actions={
+                <>
+                  <Input
+                    icon="search"
+                    className="!h-9 !w-auto min-w-[13rem]"
+                    placeholder="Rechercher…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    aria-label="Rechercher dans l'historique"
                   />
+                  {historyTotal > 0 && (
+                    <IconButton
+                      icon="trash"
+                      label="Supprimer tout l'historique"
+                      variant="danger"
+                      size="sm"
+                      disabled={deleteHistory.isPending}
+                      onClick={askDeleteHistory}
+                    />
+                  )}
+                </>
+              }
+            >
+              Historique
+            </SectionTitle>
+
+            {historyQuery.isLoading ? (
+              <div className={GRID}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <CardSkeleton key={i} />
                 ))}
               </div>
-            </section>
-          ) : (
-            events.length === 0 &&
-            !plan.isPending && (
+            ) : historyEvents.length > 0 ? (
+              <>
+                <div className={GRID}>
+                  {historyEvents.map((ev) => (
+                    <EventCard
+                      key={ev.id}
+                      event={ev}
+                      selected={selectedIds.includes(ev.id)}
+                      onToggleSelect={toggle}
+                      onRephrased={invalidateEvents}
+                      onEdit={openEdit}
+                      onDelete={askDeleteEvent}
+                    />
+                  ))}
+                </div>
+                {canLoadMore && (
+                  <div className="flex justify-center">
+                    <Button
+                      variant="ghost"
+                      icon="chevron-down"
+                      loading={historyQuery.isFetching}
+                      onClick={() => setHistoryLimit((n) => n + HISTORY_PAGE)}
+                    >
+                      Charger plus ({historyTotal - historyEvents.length} restants)
+                    </Button>
+                  </div>
+                )}
+              </>
+            ) : debouncedSearch ? (
               <EmptyState
-                icon="🔭"
-                title="Aucun événement pour l'instant"
-                description="Choisissez vos filtres puis cliquez sur « Trouver les évènements » pour lancer votre veille."
+                icon="search"
+                title="Aucun résultat"
+                description={`Aucun événement enregistré ne correspond à « ${debouncedSearch} ».`}
+                action={
+                  <Button variant="ghost" onClick={() => setSearch('')}>
+                    Effacer la recherche
+                  </Button>
+                }
               />
-            )
-          )}
+            ) : (
+              events.length === 0 &&
+              !plan.isPending && (
+                <EmptyState
+                  icon="compass"
+                  title="Aucun événement pour l'instant"
+                  description="Choisissez vos filtres puis lancez une recherche. Vous pouvez aussi saisir un événement que vous connaissez déjà."
+                  action={
+                    <Button variant="secondary" icon="plus" onClick={openCreate}>
+                      Ajouter un événement
+                    </Button>
+                  }
+                />
+              )
+            )}
+          </section>
         </>
       )}
 
-      {/* ─── Modale : ajout manuel d'un événement ─── */}
-      <ManualEventModal open={manualOpen} onClose={() => setManualOpen(false)} />
+      <EventFormModal
+        open={formOpen}
+        event={editing}
+        onClose={() => setFormOpen(false)}
+        onSaved={(saved) => {
+          // Une édition doit se refléter immédiatement dans la grille des
+          // résultats fraîchement générés, qui vit hors du cache React Query.
+          updateNewEvent(saved);
+        }}
+      />
 
-      {/* ─── Modale de validation du plan ─── */}
-      <Modal open={!!planText} onClose={() => setPlanText(null)} title="Plan proposé par l'IA">
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-secondary">
-            Voici l'approche que l'IA suivra pour générer vos événements. Validez pour lancer, ou annulez pour ajuster vos filtres.
-          </p>
-          <div className="glass rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed max-h-[45vh] overflow-y-auto">
-            {planText}
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button className="btn-ghost text-sm" onClick={() => setPlanText(null)}>
+      {/* ─── Validation du plan ─── */}
+      <Modal
+        open={!!planText}
+        onClose={() => setPlanText(null)}
+        title="Plan proposé par l'IA"
+        description="Validez pour lancer la recherche, ou ajustez vos filtres."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPlanText(null)}>
               Annuler
-            </button>
-            <button className="btn-ghost text-sm flex items-center gap-2" onClick={() => plan.mutate()} disabled={plan.isPending}>
-              {plan.isPending ? <Spinner /> : '🔄'} Regénérer le plan
-            </button>
-            <button className="btn-primary text-sm flex items-center gap-2" onClick={validatePlan}>
-              ✅ Valider & générer
-            </button>
-          </div>
+            </Button>
+            <Button
+              variant="secondary"
+              icon="refresh"
+              onClick={() => plan.mutate()}
+              loading={plan.isPending}
+            >
+              Regénérer le plan
+            </Button>
+            <Button variant="primary" icon="check" onClick={validatePlan}>
+              Valider & générer
+            </Button>
+          </>
+        }
+      >
+        <div className="whitespace-pre-wrap rounded-lg border border-line bg-surface-2 p-4 text-sm leading-relaxed">
+          {planText}
         </div>
       </Modal>
     </div>
@@ -668,40 +772,26 @@ export function DiscoveryPage() {
 }
 
 /**
- * Rappel compact des calendriers existants sur la page principale : accès
- * direct et suppression, sans avoir à passer par la page « Calendrier ».
+ * Rappel compact des calendriers existants : accès direct depuis la page
+ * principale, sans passer par l'onglet Calendrier.
  */
-function CalendarBar({
-  plans,
-  onDelete,
-  deletingId,
-}: {
-  plans: PostPlan[];
-  onDelete: (plan: PostPlan) => void;
-  deletingId: string | null;
-}) {
+function CalendarBar({ plans }: { plans: PostPlan[] }) {
   if (plans.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-sm text-muted flex items-center gap-1.5">
-        <span aria-hidden>🗓️</span> Mes calendriers :
+      <span className="inline-flex items-center gap-1.5 text-[13px] text-content-muted">
+        <Icon name="calendar" size={14} />
+        Mes calendriers
       </span>
       {plans.map((p) => (
-        <div key={p.id} className="glass rounded-xl flex items-center">
-          <Link to="/calendrier" className="py-1.5 pl-3 pr-1.5 text-sm hover:underline">
-            {p.name} <span className="opacity-60 text-xs">({p._count?.posts ?? 0})</span>
-          </Link>
-          <button
-            onClick={() => onDelete(p)}
-            disabled={deletingId === p.id}
-            aria-label={`Supprimer le calendrier « ${p.name} »`}
-            title="Supprimer ce calendrier"
-            className="h-7 w-7 mr-1.5 rounded-lg flex items-center justify-center text-xs
-                       opacity-50 hover:opacity-100 hover:bg-red-500/20 transition-opacity disabled:opacity-30"
-          >
-            {deletingId === p.id ? '…' : '🗑️'}
-          </button>
-        </div>
+        <Link
+          key={p.id}
+          to="/calendrier"
+          className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[13px] transition-colors hover:border-line-strong hover:bg-surface-2"
+        >
+          {p.name}
+          <span className="text-2xs text-content-muted">{p._count?.posts ?? 0}</span>
+        </Link>
       ))}
     </div>
   );

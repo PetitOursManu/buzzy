@@ -36,10 +36,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       PORT: 3000
       NODE_ENV: production
-      # Recherche web SearXNG (services searxng + searxng-mcp ci-dessous).
-      # Pré-enregistre le serveur MCP dans Buzzy au démarrage ; il reste à
-      # l'activer dans Paramètres → Recherche Web (MCP).
+      # Serveurs de recherche web MCP livrés avec la stack (ci-dessous).
+      # Pré-enregistrés DÉSACTIVÉS dans Buzzy au démarrage ; il reste à les
+      # cocher dans Paramètres → Recherche Web (MCP).
+      # Laisser une valeur vide pour ne pas pré-enregistrer le serveur.
       SEARXNG_MCP_URL: ${SEARXNG_MCP_URL:-http://searxng-mcp:8000/mcp}
+      MCP_FETCH_URL: ${MCP_FETCH_URL:-http://mcp-fetch:8000/mcp}
+      MCP_TIME_URL: ${MCP_TIME_URL:-http://mcp-time:8000/mcp}
     # Port interne exposé au réseau Docker / au proxy Coolify (pas à l'hôte).
     expose:
       - '3000'

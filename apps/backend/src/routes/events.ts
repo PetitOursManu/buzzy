@@ -8,6 +8,7 @@ import {
   eventPlanSchema,
   eventListQuerySchema,
   manualEventSchema,
+  eventUpdateSchema,
   deleteEventsSchema,
 } from './schemas';
 import { generateEvents, planEvents, rephraseEvent } from '../services/event.service';
@@ -62,12 +63,68 @@ router.post('/:id/rephrase', aiGenerationLimiter, async (req, res) => {
   }
 });
 
+/** Édition manuelle d'un événement déjà enregistré. */
+router.put('/:id', validate(eventUpdateSchema), async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.event.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Événement introuvable.' });
+
+  const b = req.body as {
+    title?: string;
+    description?: string;
+    eventDate?: string | null;
+    eventPeriod?: string | null;
+    scope?: EventScope;
+    region?: string | null;
+    theme?: string;
+  };
+
+  const data: Record<string, unknown> = {};
+  if (b.title !== undefined) data.title = b.title.trim().slice(0, 300);
+  if (b.description !== undefined) data.description = b.description.trim();
+  if (b.scope !== undefined) data.scope = b.scope;
+  if (b.region !== undefined) data.region = b.region?.trim() || null;
+  if (b.theme !== undefined) data.theme = b.theme.trim() || 'Autre';
+  if (b.eventPeriod !== undefined) data.eventPeriod = b.eventPeriod?.trim() || null;
+
+  if (b.eventDate !== undefined) {
+    if (!b.eventDate) {
+      data.eventDate = null;
+    } else {
+      const d = new Date(b.eventDate);
+      if (isNaN(d.getTime())) return res.status(400).json({ error: 'Date invalide.' });
+      data.eventDate = d;
+    }
+  }
+
+  const event = await prisma.event.update({ where: { id }, data });
+  return res.json(event);
+});
+
+/**
+ * Supprime un événement. Les publications qui en découlaient sont conservées
+ * (la clé étrangère est en ON DELETE SET NULL) : on prévient l'appelant du
+ * nombre de publications qui perdent leur source.
+ */
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.event.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Événement introuvable.' });
+
+  const linkedPosts = await prisma.post.count({ where: { relatedEventId: id } });
+  await prisma.event.delete({ where: { id } });
+  return res.json({ ok: true, id, unlinkedPosts: linkedPosts });
+});
+
 /** Supprime l'historique des événements (sauf ceux passés dans exceptIds). */
 router.delete('/', validate(deleteEventsSchema), async (req, res) => {
   const { exceptIds } = req.body as { exceptIds: string[] };
   const where = exceptIds.length > 0 ? { id: { notIn: exceptIds } } : {};
+  const unlinkedPosts = await prisma.post.count({
+    where: { relatedEventId: { not: null }, relatedEvent: where },
+  });
   const result = await prisma.event.deleteMany({ where });
-  return res.json({ deleted: result.count });
+  return res.json({ deleted: result.count, unlinkedPosts });
 });
 
 type ScopeInput = {
@@ -165,6 +222,7 @@ router.get('/', validate(eventListQuerySchema, 'query'), async (req, res) => {
     theme?: string;
     region?: string;
     verified?: 'true' | 'false';
+    q?: string;
     take: number;
     skip: number;
   }>(req, 'query');
@@ -174,6 +232,16 @@ router.get('/', validate(eventListQuerySchema, 'query'), async (req, res) => {
   if (q.theme) where.theme = q.theme;
   if (q.region) where.region = { contains: q.region, mode: 'insensitive' };
   if (q.verified) where.verified = q.verified === 'true';
+
+  const search = q.q?.trim();
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+      { theme: { contains: search, mode: 'insensitive' } },
+      { region: { contains: search, mode: 'insensitive' } },
+    ];
+  }
 
   const [events, total] = await Promise.all([
     prisma.event.findMany({

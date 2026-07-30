@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useMutation } from '@tanstack/react-query';
+import clsx from 'clsx';
 import type { EventItem, Network } from '../lib/types';
-import { SCOPE_LABEL, NETWORK_EMOJI, NETWORK_LABEL } from '../lib/constants';
-import { Chip, Spinner } from './ui';
+import { NETWORK_LABEL, NETWORK_RECOMMENDED, SCOPE_ICON, SCOPE_LABEL } from '../lib/constants';
+import { Badge, Button, Checkbox, IconButton } from './ui';
+import { Icon, type IconName } from './icons';
+import { NetworkIcon } from './NetworkIcon';
 import { useToast } from '../hooks/useToast';
 import { eventsApi, ApiError } from '../lib/api';
 
@@ -27,84 +30,102 @@ function searchUrl(event: EventItem): string {
   return `https://duckduckgo.com/?q=${encodeURIComponent(q)}`;
 }
 
-const SOURCE_HINT: Record<string, { icon: string; label: string; className: string }> = {
-  ok: { icon: '✅', label: 'Lien vérifié', className: 'text-[color:var(--grape)]' },
+const SOURCE_HINT: Record<string, { icon: IconName; label: string; className: string }> = {
+  ok: { icon: 'check-circle', label: 'Lien vérifié', className: 'text-success' },
   redirected: {
-    icon: '↪️',
+    icon: 'alert-triangle',
     label: "Redirige vers l'accueil du site — page précise introuvable",
-    className: 'text-amber-600 dark:text-amber-400',
+    className: 'text-warning',
   },
   unchecked: {
-    icon: '❔',
+    icon: 'help-circle',
     label: 'Lien non vérifiable automatiquement (site protégé)',
-    className: 'text-[color:var(--text-secondary)]',
+    className: 'text-content-muted',
   },
 };
 
-/** Liste des sources, avec l'état réel de chaque lien. */
+/* ─── Sources ──────────────────────────────────────────────────── */
+
 function SourceList({ event }: { event: EventItem }) {
   const sources = event.sources ?? [];
 
-  if (sources.length === 0) {
-    return (
-      <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-muted">Sources :</span>
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          Aucune source fiable fournie (les liens inexistants sont automatiquement écartés).
-        </p>
-        <a
-          href={searchUrl(event)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-[color:var(--grape)] hover:underline"
-        >
-          🔎 Rechercher des sources sur le web
-        </a>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted">Sources :</span>
-      <ul className="flex flex-col gap-0.5">
-        {sources.slice(0, 4).map((s, i) => {
-          const hint = SOURCE_HINT[s.status ?? 'unchecked'] ?? SOURCE_HINT.unchecked;
-          return (
-            <li key={i}>
-              <a
-                href={s.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`${hint.label} — ${s.url}`}
-                className={`text-xs hover:underline break-all ${hint.className}`}
-              >
-                {hint.icon} {s.title || s.url}
-              </a>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="flex flex-col gap-1.5">
+      <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
+        Sources
+      </span>
+
+      {sources.length === 0 ? (
+        <p className="text-xs text-warning">
+          Aucune source fiable fournie — les liens inexistants sont écartés automatiquement.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {sources.slice(0, 4).map((s, i) => {
+            const hint = SOURCE_HINT[s.status ?? 'unchecked'] ?? SOURCE_HINT.unchecked;
+            return (
+              <li key={i}>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`${hint.label} — ${s.url}`}
+                  className={clsx(
+                    'inline-flex max-w-full items-start gap-1.5 text-xs hover:underline',
+                    hint.className,
+                  )}
+                >
+                  <Icon name={hint.icon} size={13} className="mt-0.5" />
+                  <span className="truncate">{s.title || s.url}</span>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
       <a
         href={searchUrl(event)}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-xs text-muted hover:underline"
+        className="inline-flex items-center gap-1.5 text-xs text-content-muted hover:text-content hover:underline"
       >
-        🔎 Chercher d'autres sources
+        <Icon name="search" size={13} />
+        {sources.length === 0 ? 'Rechercher des sources' : "Chercher d'autres sources"}
       </a>
     </div>
   );
 }
 
-/** Descriptions adaptées par réseau (onglets + copie). */
-function NetworkDescriptions({ descriptions }: { descriptions: Partial<Record<Network, string>> }) {
+/* ─── Descriptions par réseau ──────────────────────────────────── */
+
+function NetworkDescriptions({
+  descriptions,
+}: {
+  descriptions: Partial<Record<Network, string>>;
+}) {
   const { toast } = useToast();
-  const networks = Object.keys(descriptions).filter(
-    (n) => descriptions[n as Network],
-  ) as Network[];
-  const [active, setActive] = useState<Network>(networks[0]);
+  const networks = useMemo(
+    () => (Object.keys(descriptions) as Network[]).filter((n) => descriptions[n]),
+    [descriptions],
+  );
+  const [active, setActive] = useState<Network | null>(networks[0] ?? null);
+
+  // Une régénération peut retirer le réseau affiché : sans ce recalage,
+  // l'onglet actif pointerait vers un texte disparu.
+  useEffect(() => {
+    if (networks.length === 0) {
+      setActive(null);
+    } else if (!active || !networks.includes(active)) {
+      setActive(networks[0]);
+    }
+  }, [networks, active]);
+
+  if (networks.length === 0 || !active) return null;
+
   const text = descriptions[active] ?? '';
+  const limit = NETWORK_RECOMMENDED[active];
+  const tooLong = text.length > limit;
 
   const copy = async () => {
     try {
@@ -115,51 +136,63 @@ function NetworkDescriptions({ descriptions }: { descriptions: Partial<Record<Ne
     }
   };
 
-  if (networks.length === 0) return null;
-
   return (
-    <div className="flex flex-col gap-2 border-t border-[color:var(--glass-border)] pt-3">
-      <span className="text-xs font-medium text-muted">Descriptions par réseau :</span>
-      <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <span className="text-2xs font-semibold uppercase tracking-wide text-content-muted">
+        Descriptions par réseau
+      </span>
+
+      <div className="flex flex-wrap gap-1">
         {networks.map((n) => (
           <button
             key={n}
             type="button"
             onClick={() => setActive(n)}
             aria-pressed={active === n}
-            className={
+            title={NETWORK_LABEL[n]}
+            className={clsx(
+              'flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
               active === n
-                ? 'chip !bg-grape !text-white !border-transparent'
-                : 'chip hover:border-[color:var(--grape)]'
-            }
+                ? 'border-line-strong bg-surface-2'
+                : 'border-transparent opacity-55 hover:opacity-100',
+            )}
           >
-            {NETWORK_EMOJI[n]} {NETWORK_LABEL[n]}
+            <NetworkIcon network={n} size={15} colored={active === n} />
           </button>
         ))}
       </div>
-      <div className="glass rounded-xl p-3 flex flex-col gap-2">
-        <p className="text-sm whitespace-pre-wrap">{text}</p>
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted">{text.length} caractères</span>
-          <button type="button" onClick={copy} className="btn-ghost !py-1 !px-2.5 text-xs">
-            📋 Copier
-          </button>
+
+      <div className="rounded-md border border-line bg-surface-2 p-2.5">
+        <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{text}</p>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className={clsx('text-2xs tabular-nums', tooLong ? 'text-warning' : 'text-content-muted')}>
+            {text.length} / {limit} caractères conseillés
+          </span>
+          <Button size="sm" variant="ghost" icon="copy" onClick={copy}>
+            Copier
+          </Button>
         </div>
       </div>
     </div>
   );
 }
 
+/* ─── Carte ────────────────────────────────────────────────────── */
+
 export function EventCard({
   event,
   selected,
   onToggleSelect,
   onRephrased,
+  onEdit,
+  onDelete,
 }: {
   event: EventItem;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   onRephrased?: (updated: EventItem) => void;
+  onEdit?: (event: EventItem) => void;
+  onDelete?: (event: EventItem) => void;
 }) {
   const { toast } = useToast();
   const hasNetworkDescriptions =
@@ -171,62 +204,99 @@ export function EventCard({
       toast('Alternative générée.', 'success');
       onRephrased?.(updated);
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Erreur lors de la génération.', 'error'),
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Erreur lors de la génération.', 'error'),
   });
 
   return (
     <motion.article
       layout
-      initial={{ opacity: 0, y: 24, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-      whileHover={{ y: -6 }}
-      className="group glass rounded-2xl p-5 flex flex-col gap-3 hover:shadow-glow transition-shadow"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 30 }}
+      className={clsx(
+        'group flex flex-col gap-3 rounded-xl border bg-surface p-4 transition-shadow',
+        selected ? 'border-brand shadow-brand' : 'border-line shadow-sm hover:shadow-md',
+      )}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone="honey">📍 {SCOPE_LABEL[event.scope]}</Chip>
-        <Chip tone="grape">{event.theme}</Chip>
-        {event.verified ? (
-          <Chip tone="green">✔ Sources vérifiées</Chip>
-        ) : (
-          <Chip tone="amber">⚠ Sources à vérifier</Chip>
+      {/* En-tête : qualification + actions au survol */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone="neutral" icon={SCOPE_ICON[event.scope]}>
+            {SCOPE_LABEL[event.scope]}
+          </Badge>
+          <Badge tone="accent">{event.theme}</Badge>
+          {event.verified ? (
+            <Badge tone="success" icon="shield">
+              Sources vérifiées
+            </Badge>
+          ) : (
+            <Badge tone="warning" icon="alert-triangle">
+              À vérifier
+            </Badge>
+          )}
+        </div>
+
+        {(onEdit || onDelete) && (
+          <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            {onEdit && (
+              <IconButton icon="pencil" label="Modifier" size="sm" onClick={() => onEdit(event)} />
+            )}
+            {onDelete && (
+              <IconButton
+                icon="trash"
+                label="Supprimer"
+                size="sm"
+                variant="danger"
+                onClick={() => onDelete(event)}
+              />
+            )}
+          </div>
         )}
       </div>
 
-      <h3 className="text-lg font-display font-semibold leading-snug">{event.title}</h3>
-      {event.region && <p className="text-xs text-muted -mt-1">🌍 {event.region}</p>}
-
-      <p className="text-sm text-secondary flex-1">{event.description}</p>
-
-      <div className="text-xs text-muted flex items-center gap-1.5">
-        <span aria-hidden>🗓️</span>
-        {formatEventWhen(event)}
+      <div>
+        <h3 className="font-display text-[15px] leading-snug">{event.title}</h3>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-muted">
+          <span className="inline-flex items-center gap-1">
+            <Icon name="calendar" size={13} />
+            {formatEventWhen(event)}
+          </span>
+          {event.region && (
+            <span className="inline-flex items-center gap-1">
+              <Icon name="map-pin" size={13} />
+              {event.region}
+            </span>
+          )}
+        </div>
       </div>
+
+      <p className="flex-1 text-[13px] leading-relaxed text-content-2">{event.description}</p>
 
       <SourceList event={event} />
 
-      {hasNetworkDescriptions && <NetworkDescriptions descriptions={event.networkDescriptions!} />}
+      {hasNetworkDescriptions && (
+        <NetworkDescriptions descriptions={event.networkDescriptions!} />
+      )}
 
-      <button
-        type="button"
-        onClick={() => rephrase.mutate()}
-        disabled={rephrase.isPending}
-        className="btn-ghost !py-1.5 text-xs flex items-center justify-center gap-1.5"
-        title="Reformuler le titre et la description via l'IA"
-      >
-        {rephrase.isPending ? <Spinner /> : '🔄'} Générer une alternative (titre & description)
-      </button>
-
-      <label className="mt-1 flex items-center gap-2 cursor-pointer select-none border-t border-[color:var(--glass-border)] pt-3">
-        <input
-          type="checkbox"
+      <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
+        <Checkbox
           checked={selected}
           onChange={() => onToggleSelect(event.id)}
-          className="h-4 w-4 accent-[color:var(--honey)]"
+          label="Ajouter au calendrier"
         />
-        <span className="text-sm font-medium">Ajouter au calendrier</span>
-      </label>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="refresh"
+          loading={rephrase.isPending}
+          onClick={() => rephrase.mutate()}
+          title="Reformuler le titre et la description via l'IA"
+        >
+          Reformuler
+        </Button>
+      </div>
     </motion.article>
   );
 }

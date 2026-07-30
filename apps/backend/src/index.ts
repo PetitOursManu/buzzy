@@ -3,8 +3,9 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { env, isProduction } from './lib/env';
+import { env, isProduction, auditEnvironment } from './lib/env';
 import { prisma } from './lib/prisma';
+import { APP_VERSION } from './lib/version';
 import { ensureAdminUser, ensureSeededMcpServers } from './seed';
 
 import authRoutes from './routes/auth';
@@ -14,9 +15,12 @@ import calendarRoutes from './routes/calendar';
 import postsRoutes from './routes/posts';
 
 async function main() {
+  auditEnvironment();
+
   const app = express();
 
   app.set('trust proxy', 1);
+  app.disable('x-powered-by');
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
 
@@ -30,7 +34,24 @@ async function main() {
   }
 
   // ─── API ────────────────────────────────────────────────────
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok', name: 'buzzy' }));
+  // Sonde de vitalité : interrogée par Docker/Coolify, donc publique et
+  // volontairement avare en détails.
+  app.get('/api/health', async (_req, res) => {
+    let database = false;
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      database = true;
+    } catch {
+      database = false;
+    }
+    return res.status(database ? 200 : 503).json({
+      status: database ? 'ok' : 'degraded',
+      name: 'buzzy',
+      version: APP_VERSION,
+      database,
+    });
+  });
+
   app.use('/api/auth', authRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/events', eventsRoutes);
@@ -40,7 +61,39 @@ async function main() {
   // 404 pour toute route API inconnue.
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Route API introuvable.' }));
 
-  // Gestionnaire d'erreurs global (pas de stack trace exposée en prod).
+  // ─── Frontend statique (SPA) ────────────────────────────────
+  // Le build frontend est copié dans ./public à côté du backend compilé.
+  const publicDir = path.resolve(__dirname, '..', 'public');
+  if (fs.existsSync(publicDir)) {
+    // Les assets Vite portent un hash dans leur nom : immuables et cachables
+    // longtemps. index.html, lui, ne doit jamais être mis en cache, sans quoi
+    // un déploiement continue de servir l'ancienne application.
+    app.use(
+      express.static(publicDir, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      }),
+    );
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(publicDir, 'index.html'));
+    });
+  } else {
+    app.get('/', (_req, res) =>
+      res.json({
+        name: 'buzzy',
+        version: APP_VERSION,
+        message: 'API en ligne. Frontend non buildé (mode développement).',
+      }),
+    );
+  }
+
+  // Gestionnaire d'erreurs global — enregistré EN DERNIER, seule position où
+  // Express le fait intercepter les erreurs de toutes les couches précédentes.
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       console.error('Erreur non gérée:', err);
@@ -49,30 +102,18 @@ async function main() {
     },
   );
 
-  // ─── Frontend statique (SPA) ────────────────────────────────
-  // Le build frontend est copié dans ./public à côté du backend compilé.
-  const publicDir = path.resolve(__dirname, '..', 'public');
-  if (fs.existsSync(publicDir)) {
-    app.use(express.static(publicDir));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(publicDir, 'index.html'));
-    });
-  } else {
-    app.get('/', (_req, res) =>
-      res.json({ name: 'buzzy', message: 'API en ligne. Frontend non buildé (mode développement).' }),
-    );
-  }
-
   // ─── Démarrage ──────────────────────────────────────────────
   try {
     await ensureAdminUser();
     await ensureSeededMcpServers();
   } catch (e) {
-    console.error('[startup] Erreur lors de l\'initialisation :', e);
+    console.error("[startup] Erreur lors de l'initialisation :", e);
   }
 
   app.listen(env.PORT, () => {
-    console.log(`🐝 Buzzy en écoute sur le port ${env.PORT} (${isProduction ? 'production' : 'dev'})`);
+    console.log(
+      `🐝 Buzzy v${APP_VERSION} en écoute sur le port ${env.PORT} (${isProduction ? 'production' : 'dev'})`,
+    );
   });
 }
 
@@ -92,7 +133,7 @@ process.on('SIGTERM', () => {
 });
 
 main().catch(async (e) => {
-  console.error('Échec du démarrage du serveur :', e);
-  await prisma.$disconnect();
+  console.error('Échec du démarrage du serveur :', e instanceof Error ? e.message : e);
+  await prisma.$disconnect().catch(() => undefined);
   process.exit(1);
 });

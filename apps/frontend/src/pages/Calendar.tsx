@@ -1,53 +1,87 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { calendarApi, postsApi, ApiError } from '../lib/api';
-import type { Network, PostItem, PostPlan } from '../lib/types';
-import { NETWORK_LABEL } from '../lib/constants';
-import { CardSkeleton, EmptyState, Field, GlassPanel, Modal, Spinner } from '../components/ui';
-import { ListView, MonthView, PeriodNav, WeekView, startOfWeek } from '../components/CalendarViews';
-import { ManualEventModal } from '../components/ManualEventModal';
+import clsx from 'clsx';
+import { calendarApi, postsApi, ApiError, type ExportFormat } from '../lib/api';
+import type { Network, PostItem, PostPlan, PostStatus } from '../lib/types';
+import { NETWORK_LABEL, POST_STATUS, POST_STATUS_LABEL } from '../lib/constants';
+import {
+  Alert,
+  Button,
+  Card,
+  CardSkeleton,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  Modal,
+  PageHeader,
+  SegmentedControl,
+  Select,
+  Skeleton,
+  Textarea,
+  buttonClasses,
+} from '../components/ui';
+import { Icon } from '../components/icons';
+import { ListView, MonthView, PeriodNav, StatusLegend, WeekView, startOfWeek } from '../components/CalendarViews';
+import { EventFormModal } from '../components/EventFormModal';
 import { NetworkSelector } from '../components/NetworkIcon';
 import { PostModal } from '../components/PostModal';
 import { ReschedulePanel } from '../components/ReschedulePanel';
 import { useToast } from '../hooks/useToast';
+import { useConfirm } from '../hooks/useConfirm';
 import { useSelection } from '../hooks/useSelection';
 import { usePreferredNetworks } from '../hooks/usePreferredNetworks';
 
 type FreqType = 'day' | 'week' | 'month';
 type ViewMode = 'month' | 'week' | 'list';
+type StatusFilter = PostStatus | 'ALL';
 
 const today = new Date();
 const inTwoWeeks = new Date(today.getTime() + 14 * 24 * 3600 * 1000);
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+const iso = (d: Date | string) => {
+  const date = new Date(d);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const EXPORTS: { format: ExportFormat; label: string; title: string }[] = [
+  { format: 'ics', label: 'iCal', title: 'Importer dans Google Agenda, Outlook, Apple Calendar…' },
+  { format: 'csv', label: 'CSV', title: 'Ouvrir dans un tableur' },
+  { format: 'json', label: 'JSON', title: 'Export brut, pour un traitement automatisé' },
+];
 
 export function CalendarPage() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const { selectedIds, clear, toggle } = useSelection();
   const queryClient = useQueryClient();
 
-  // Ajout manuel d'un événement (formulaire partagé avec la page principale).
-  const [manualOpen, setManualOpen] = useState(false);
+  const [eventFormOpen, setEventFormOpen] = useState(false);
 
+  /* ─── Formulaire de création ─── */
   const [name, setName] = useState('');
   const [startDate, setStartDate] = useState(iso(today));
   const [endDate, setEndDate] = useState(iso(inTwoWeeks));
   const [freqType, setFreqType] = useState<FreqType>('week');
   const [freqCount, setFreqCount] = useState(3);
+
   // Seuls les réseaux retenus dans les Paramètres sont proposés : ce sont les
   // seuls pour lesquels une description a été rédigée lors de la découverte.
-  const { networks: preferredNetworks, loading: networksLoading, isEmpty: noPreferredNetworks } =
-    usePreferredNetworks();
+  const {
+    networks: preferredNetworks,
+    loading: networksLoading,
+    isEmpty: noPreferredNetworks,
+  } = usePreferredNetworks();
   const [networks, setNetworks] = useState<Network[]>([]);
 
   // Tout réseau retiré des Paramètres disparaît aussi de la sélection en cours.
   useEffect(() => {
     if (networksLoading) return;
     setNetworks((prev) => {
-      const kept = prev.filter((n) => preferredNetworks.includes(n));
-      // Première visite : on part de tous les réseaux configurés.
       if (prev.length === 0) return preferredNetworks;
+      const kept = prev.filter((n) => preferredNetworks.includes(n));
       return kept.length === prev.length ? prev : kept;
     });
   }, [preferredNetworks, networksLoading]);
@@ -58,6 +92,7 @@ export function CalendarPage() {
 
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [selectedPost, setSelectedPost] = useState<PostItem | null>(null);
 
   const plansQuery = useQuery({ queryKey: ['calendar', 'list'], queryFn: calendarApi.list });
@@ -66,9 +101,14 @@ export function CalendarPage() {
     queryFn: () => calendarApi.get(activePlanId!),
     enabled: !!activePlanId,
   });
+  const activePlan = planQuery.data;
 
   const toggleNetwork = (n: Network) =>
     setNetworks((prev) => (prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]));
+
+  const invalidateAll = () => queryClient.invalidateQueries({ queryKey: ['calendar'] });
+
+  /* ─── Mutations ─── */
 
   const generate = useMutation({
     mutationFn: () =>
@@ -82,19 +122,15 @@ export function CalendarPage() {
         selectedEventIds: eventSource === 'selected' ? selectedIds : [],
       }),
     onSuccess: (data) => {
-      if (data.warning) {
-        toast(data.warning, 'info');
-      } else {
-        toast(`Calendrier généré : ${data.posts.length} publication(s).`, 'success');
-      }
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      if (data.warning) toast(data.warning, 'info');
+      else toast(`Calendrier généré : ${data.posts.length} publication(s).`, 'success');
+      invalidateAll();
       setActivePlanId(data.postPlan.id);
       setViewMode('list');
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Erreur de génération.', 'error'),
   });
 
-  /** Crée un calendrier vide : aucune publication n'est générée. */
   const createEmpty = useMutation({
     mutationFn: () =>
       calendarApi.createEmpty({
@@ -106,7 +142,7 @@ export function CalendarPage() {
       }),
     onSuccess: (plan) => {
       toast('Calendrier vide créé. Ajoutez-y vos publications à la main.', 'success');
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      invalidateAll();
       setActivePlanId(plan.id);
       setViewMode('list');
     },
@@ -118,17 +154,16 @@ export function CalendarPage() {
     onSuccess: (_res, id) => {
       toast('Calendrier supprimé.', 'success');
       if (activePlanId === id) setActivePlanId(null);
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      invalidateAll();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
   });
 
   const clearPosts = useMutation({
     mutationFn: (id: string) => calendarApi.clearPosts(id),
-    onSuccess: (res, id) => {
+    onSuccess: (res) => {
       toast(`${res.deleted} publication(s) supprimée(s).`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['calendar', id] });
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      invalidateAll();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
   });
@@ -139,14 +174,13 @@ export function CalendarPage() {
     onMutate: (id: string) => setDeletingPostId(id),
     onSuccess: () => {
       toast('Publication supprimée.', 'success');
-      queryClient.invalidateQueries({ queryKey: ['calendar', activePlanId] });
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      invalidateAll();
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
     onSettled: () => setDeletingPostId(null),
   });
 
-  // Ajout manuel d'une publication dans le calendrier actif.
+  /* ─── Ajout manuel d'une publication ─── */
   const [postOpen, setPostOpen] = useState(false);
   const [pDate, setPDate] = useState(iso(today));
   const [pNetwork, setPNetwork] = useState<Network | ''>('');
@@ -168,8 +202,7 @@ export function CalendarPage() {
           .filter(Boolean),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calendar', activePlanId] });
-      queryClient.invalidateQueries({ queryKey: ['calendar', 'list'] });
+      invalidateAll();
       toast('Publication ajoutée.', 'success');
       setPostOpen(false);
       setPTitle('');
@@ -179,16 +212,11 @@ export function CalendarPage() {
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Ajout impossible.', 'error'),
   });
 
-  const activePlan = planQuery.data;
-
-  // ─── Navigation dans les vues Mois et Semaine ───
-  // `anchor` est la période affichée ; elle démarre au début du calendrier et
-  // se déplace ensuite librement avec les flèches.
+  /* ─── Navigation Mois / Semaine ─── */
   const [anchor, setAnchor] = useState<Date | null>(null);
   const planStart = activePlan ? new Date(activePlan.startDate) : today;
   const currentAnchor = anchor ?? planStart;
 
-  // Changer de calendrier remet la navigation à son début.
   useEffect(() => {
     setAnchor(null);
   }, [activePlanId]);
@@ -215,7 +243,7 @@ export function CalendarPage() {
           return `${start.toLocaleDateString('fr-FR', opts)} – ${end.toLocaleDateString('fr-FR', opts)} ${end.getFullYear()}`;
         })();
 
-  // ─── Modification du calendrier (nom et plage de dates) ───
+  /* ─── Modification du calendrier ─── */
   const [editOpen, setEditOpen] = useState(false);
   const [eName, setEName] = useState('');
   const [eStart, setEStart] = useState('');
@@ -223,21 +251,17 @@ export function CalendarPage() {
 
   const openEdit = (plan: PostPlan) => {
     setEName(plan.name);
-    setEStart(iso(new Date(plan.startDate)));
-    setEEnd(iso(new Date(plan.endDate)));
+    setEStart(iso(plan.startDate));
+    setEEnd(iso(plan.endDate));
     setEditOpen(true);
   };
 
   const updatePlan = useMutation({
     mutationFn: () =>
-      calendarApi.update(activePlanId!, {
-        name: eName.trim(),
-        startDate: eStart,
-        endDate: eEnd,
-      }),
+      calendarApi.update(activePlanId!, { name: eName.trim(), startDate: eStart, endDate: eEnd }),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['calendar'] });
-      setAnchor(null); // la navigation repart du nouveau début
+      invalidateAll();
+      setAnchor(null);
       toast('Calendrier mis à jour.', 'success');
       if (res.warning) toast(res.warning, 'info');
       setEditOpen(false);
@@ -245,26 +269,64 @@ export function CalendarPage() {
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Modification impossible.', 'error'),
   });
 
+  /* ─── Publications filtrées ─── */
+  const allPosts = useMemo(() => activePlan?.posts ?? [], [activePlan]);
+  const visiblePosts = useMemo(
+    () => (statusFilter === 'ALL' ? allPosts : allPosts.filter((p) => p.status === statusFilter)),
+    [allPosts, statusFilter],
+  );
+  const statusCounts = useMemo(() => {
+    const counts: Record<PostStatus, number> = { DRAFT: 0, APPROVED: 0, PUBLISHED: 0 };
+    allPosts.forEach((p) => {
+      counts[p.status] += 1;
+    });
+    return counts;
+  }, [allPosts]);
+
+  const askDeletePlan = async (plan: PostPlan) => {
+    const ok = await confirm({
+      title: `Supprimer « ${plan.name} » ?`,
+      message: 'Le calendrier et toutes ses publications seront supprimés définitivement.',
+      confirmLabel: 'Supprimer',
+    });
+    if (ok) deletePlan.mutate(plan.id);
+  };
+
+  const askClearPosts = async (plan: PostPlan) => {
+    const ok = await confirm({
+      title: 'Vider ce calendrier ?',
+      message: `Les ${allPosts.length} publication(s) de « ${plan.name} » seront supprimées. Le calendrier est conservé, vide.`,
+      confirmLabel: 'Vider',
+    });
+    if (ok) clearPosts.mutate(plan.id);
+  };
+
+  const askDeletePost = async (post: PostItem) => {
+    const ok = await confirm({
+      title: 'Supprimer cette publication ?',
+      message: `« ${post.title} » sera retirée du calendrier.`,
+      confirmLabel: 'Supprimer',
+    });
+    if (ok) deletePost.mutate(post.id);
+  };
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-display font-bold">Calendrier éditorial</h1>
-          <p className="text-secondary mt-1">
-            Générez un calendrier de publications prêtes à adapter pour chaque réseau social.
-          </p>
-        </div>
-        <button className="btn-ghost flex items-center gap-2 text-sm" onClick={() => setManualOpen(true)}>
-          ➕ Ajouter un événement manuellement
-        </button>
-      </div>
+      <PageHeader
+        title="Calendrier éditorial"
+        description="Répartissez vos événements en publications prêtes à adapter, réseau par réseau."
+        actions={
+          <Button variant="secondary" icon="plus" onClick={() => setEventFormOpen(true)}>
+            Ajouter un événement
+          </Button>
+        }
+      />
 
-      {/* ─── Formulaire de génération ─── */}
-      <GlassPanel className="flex flex-col gap-5">
-        <div className="grid md:grid-cols-2 gap-4">
-          <Field label="Nom du calendrier (optionnel)">
-            <input
-              className="glass-input"
+      {/* ─── Création ─── */}
+      <Card className="flex flex-col gap-5">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Nom du calendrier" hint="Facultatif — daté automatiquement sinon.">
+            <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="ex : Campagne rentrée 2026"
@@ -272,10 +334,10 @@ export function CalendarPage() {
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Début">
-              <input type="date" className="glass-input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </Field>
             <Field label="Fin">
-              <input type="date" className="glass-input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </Field>
           </div>
         </div>
@@ -284,28 +346,27 @@ export function CalendarPage() {
           label="Fréquence de publication"
           hint="Chaque événement ne donne qu'une publication par réseau, à sa propre date. Cette fréquence ne sert qu'à répartir les événements sans date, ou datés hors de la plage."
         >
-          <div className="flex flex-wrap items-center gap-3">
-            <input
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Input
               type="number"
               min={1}
               max={50}
-              className="glass-input !w-24"
+              className="!w-20"
               value={freqCount}
               onChange={(e) => setFreqCount(Math.max(1, Number(e.target.value)))}
+              aria-label="Nombre de publications"
             />
-            <span className="text-secondary">post(s) par</span>
-            <div className="flex gap-2">
-              {(['day', 'week', 'month'] as FreqType[]).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFreqType(f)}
-                  className={freqType === f ? 'btn-primary !py-1.5 !px-3 text-sm' : 'btn-ghost !py-1.5 !px-3 text-sm'}
-                >
-                  {f === 'day' ? 'jour' : f === 'week' ? 'semaine' : 'mois'}
-                </button>
-              ))}
-            </div>
+            <span className="text-sm text-content-2">publication(s) par</span>
+            <SegmentedControl
+              options={[
+                { value: 'day', label: 'jour' },
+                { value: 'week', label: 'semaine' },
+                { value: 'month', label: 'mois' },
+              ]}
+              value={freqType}
+              onChange={(v) => setFreqType(v as FreqType)}
+              ariaLabel="Unité de fréquence"
+            />
           </div>
         </Field>
 
@@ -318,107 +379,110 @@ export function CalendarPage() {
           }
         >
           {networksLoading ? (
-            <div className="shimmer rounded-xl h-24 w-full max-w-md" />
+            <Skeleton className="h-[4.5rem] w-full max-w-md" />
           ) : noPreferredNetworks ? (
-            <div className="glass rounded-xl p-4 flex flex-col gap-2">
-              <p className="text-sm text-amber-500">
-                Aucun réseau retenu dans les Paramètres.
-              </p>
-              <p className="text-xs text-secondary">
-                Les descriptions d'événements sont rédigées uniquement pour les réseaux choisis dans
-                votre profil. Sélectionnez-en au moins un pour pouvoir générer un calendrier.
-              </p>
-              <Link to="/parametres" className="btn-ghost text-sm self-start !py-1.5 !px-3">
-                ⚙️ Choisir mes réseaux
-              </Link>
-            </div>
+            <Alert
+              tone="warning"
+              title="Aucun réseau retenu dans les Paramètres"
+              action={
+                <Link to="/parametres" className={buttonClasses('secondary', 'sm')}>
+                  Choisir mes réseaux
+                </Link>
+              }
+            >
+              Les descriptions d'événements sont rédigées uniquement pour les réseaux choisis dans
+              votre profil. Sélectionnez-en au moins un pour générer un calendrier.
+            </Alert>
           ) : (
-            <NetworkSelector networks={preferredNetworks} selected={networks} onToggle={toggleNetwork} />
+            <NetworkSelector
+              networks={preferredNetworks}
+              selected={networks}
+              onToggle={toggleNetwork}
+            />
           )}
         </Field>
 
         <Field label="Source des événements">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              type="button"
-              onClick={() => setEventSource('selected')}
-              className={eventSource === 'selected' ? 'btn-primary !py-2 text-sm flex-1' : 'btn-ghost !py-2 text-sm flex-1'}
-            >
-              À partir de ma sélection ({selectedIds.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setEventSource('ai')}
-              className={eventSource === 'ai' ? 'btn-primary !py-2 text-sm flex-1' : 'btn-ghost !py-2 text-sm flex-1'}
-            >
-              Laisser l'IA choisir mes événements
-            </button>
-          </div>
+          <SegmentedControl
+            options={[
+              { value: 'selected', label: `Ma sélection (${selectedIds.length})` },
+              { value: 'ai', label: 'Événements enregistrés' },
+            ]}
+            value={eventSource}
+            onChange={(v) => setEventSource(v as 'selected' | 'ai')}
+            ariaLabel="Source des événements"
+            className="!flex w-full max-w-md"
+          />
           {eventSource === 'selected' && selectedIds.length === 0 && (
-            <p className="text-xs text-amber-500 mt-2">
-              Aucun événement sélectionné. Allez dans « Découverte » pour en cocher, ou laissez l'IA choisir.
+            <p className="mt-2 text-xs text-warning">
+              Aucun événement sélectionné. Cochez-en dans « Découverte », ou basculez sur les
+              événements enregistrés.
             </p>
           )}
           {eventSource === 'selected' && selectedIds.length > 0 && (
-            <button className="text-xs text-muted hover:underline mt-2" onClick={clear}>
+            <button
+              type="button"
+              className="mt-2 text-xs text-content-muted hover:text-content hover:underline"
+              onClick={clear}
+            >
               Vider la sélection
             </button>
           )}
         </Field>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="btn-primary flex items-center gap-2"
-            onClick={() => generate.mutate()}
-            disabled={generate.isPending || createEmpty.isPending || networks.length === 0}
-          >
-            {generate.isPending ? <Spinner /> : <span aria-hidden>📅</span>}
-            Générer le calendrier
-          </button>
-          <button
-            className="btn-ghost flex items-center gap-2"
-            onClick={() => createEmpty.mutate()}
-            disabled={generate.isPending || createEmpty.isPending}
-            title="Crée un calendrier sans aucune publication : rien n'est généré par l'IA"
-          >
-            {createEmpty.isPending ? <Spinner /> : <span aria-hidden>📄</span>}
-            Créer un calendrier vide
-          </button>
+        <div className="flex flex-col gap-2 border-t border-line pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="primary"
+              icon="calendar"
+              onClick={() => generate.mutate()}
+              loading={generate.isPending}
+              disabled={createEmpty.isPending || networks.length === 0}
+            >
+              Générer le calendrier
+            </Button>
+            <Button
+              variant="secondary"
+              icon="file-text"
+              onClick={() => createEmpty.mutate()}
+              loading={createEmpty.isPending}
+              disabled={generate.isPending}
+              title="Crée un calendrier sans aucune publication"
+            >
+              Créer un calendrier vide
+            </Button>
+          </div>
+          <p className="text-xs leading-relaxed text-content-muted">
+            La génération reprend les titres et descriptions déjà rédigés lors de la découverte,
+            sans rappeler l'IA. Pour retoucher un texte, utilisez « Régénérer » sur la publication
+            concernée.
+          </p>
         </div>
-        <p className="text-xs text-muted -mt-2">
-          La génération reprend les titres et descriptions déjà rédigés lors de la découverte, sans
-          rappeler l'IA. Pour retoucher un texte, utilisez « Régénérer » sur la publication
-          concernée. Un calendrier vide, lui, est créé sans aucune publication.
-        </p>
-      </GlassPanel>
+      </Card>
 
       {generate.isPending && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <CardSkeleton key={i} />
           ))}
         </div>
       )}
 
-      {/* ─── Liste des calendriers existants ─── */}
+      {/* ─── Sélecteur de calendrier ─── */}
       <PlanSelector
         plans={plansQuery.data ?? []}
         loading={plansQuery.isLoading}
         activePlanId={activePlanId}
         onSelect={setActivePlanId}
-        onDelete={(p) => {
-          if (confirm(`Supprimer définitivement le calendrier « ${p.name} » et ses publications ?`)) {
-            deletePlan.mutate(p.id);
-          }
-        }}
+        onDelete={askDeletePlan}
         deletingId={deletePlan.isPending ? (deletePlan.variables as string) : null}
       />
 
-      {/* ─── Vue du calendrier actif ─── */}
+      {/* ─── Calendrier actif ─── */}
       {activePlanId && (
         <AnimatePresence mode="wait">
           {planQuery.isLoading ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <CardSkeleton key={i} />
               ))}
@@ -426,248 +490,323 @@ export function CalendarPage() {
           ) : activePlan ? (
             <motion.div
               key={activePlan.id}
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               className="flex flex-col gap-4"
             >
-              <div className="glass-strong rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-display font-semibold">{activePlan.name}</h2>
-                  <p className="text-xs text-muted flex flex-wrap items-center gap-1.5">
-                    <span>
-                      {new Date(activePlan.startDate).toLocaleDateString('fr-FR')} –{' '}
-                      {new Date(activePlan.endDate).toLocaleDateString('fr-FR')} ·{' '}
-                      {activePlan.posts?.length ?? 0} publication(s)
-                    </span>
-                    <button
-                      onClick={() => openEdit(activePlan)}
-                      className="hover:underline text-[color:var(--grape)]"
-                      title="Modifier le nom et les dates du calendrier"
-                    >
-                      ✏️ Modifier les dates
-                    </button>
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex gap-1">
-                    {(['month', 'week', 'list'] as ViewMode[]).map((v) => (
+              {/* Barre d'outils du calendrier */}
+              <Card padded={false} className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="font-display text-lg">{activePlan.name}</h2>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-content-muted">
+                      <span>
+                        {new Date(activePlan.startDate).toLocaleDateString('fr-FR')} –{' '}
+                        {new Date(activePlan.endDate).toLocaleDateString('fr-FR')}
+                      </span>
+                      <span aria-hidden>·</span>
+                      <span>{allPosts.length} publication(s)</span>
                       <button
-                        key={v}
-                        onClick={() => setViewMode(v)}
-                        className={viewMode === v ? 'btn-primary !py-1.5 !px-3 text-sm' : 'btn-ghost !py-1.5 !px-3 text-sm'}
+                        type="button"
+                        onClick={() => openEdit(activePlan)}
+                        className="inline-flex items-center gap-1 text-accent-text hover:underline"
                       >
-                        {v === 'month' ? 'Mois' : v === 'week' ? 'Semaine' : 'Liste'}
+                        <Icon name="pencil" size={12} />
+                        Modifier
                       </button>
-                    ))}
+                    </p>
                   </div>
-                  <button
-                    className="btn-ghost !py-1.5 !px-3 text-sm"
-                    onClick={() => {
-                      setPDate(iso(new Date(activePlan.startDate)));
-                      // Réseau du calendrier s'il fait partie des réseaux
-                      // configurés, sinon le premier réseau configuré.
-                      const planNetwork = activePlan.networks.find((n) =>
-                        preferredNetworks.includes(n),
-                      );
-                      setPNetwork(planNetwork ?? preferredNetworks[0] ?? '');
-                      setPostOpen(true);
-                    }}
-                  >
-                    ➕ Publication
-                  </button>
-                  <a href={calendarApi.exportUrl(activePlan.id, 'json')} className="btn-ghost !py-1.5 !px-3 text-sm">
-                    ⬇ JSON
-                  </a>
-                  <a href={calendarApi.exportUrl(activePlan.id, 'csv')} className="btn-ghost !py-1.5 !px-3 text-sm">
-                    ⬇ CSV
-                  </a>
-                  {(activePlan.posts?.length ?? 0) > 0 && (
-                    <button
-                      className="btn-ghost !py-1.5 !px-3 text-sm !text-red-500 hover:!bg-red-500/10"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Supprimer les ${activePlan.posts!.length} publication(s) de « ${activePlan.name} » ? Le calendrier est conservé, vide.`,
-                          )
-                        ) {
-                          clearPosts.mutate(activePlan.id);
-                        }
-                      }}
-                      disabled={clearPosts.isPending}
-                      title="Vide le calendrier de toutes ses publications"
-                    >
-                      {clearPosts.isPending ? <Spinner /> : '🧹'} Vider
-                    </button>
-                  )}
-                  <button
-                    className="btn-ghost !py-1.5 !px-3 text-sm !text-red-500 hover:!bg-red-500/10"
-                    onClick={() => {
-                      if (confirm(`Supprimer définitivement le calendrier « ${activePlan.name} » et ses publications ?`)) {
-                        deletePlan.mutate(activePlan.id);
-                      }
-                    }}
-                    disabled={deletePlan.isPending}
-                    title="Supprime ce calendrier et toutes ses publications"
-                  >
-                    {deletePlan.isPending ? <Spinner /> : '🗑️'} Supprimer
-                  </button>
-                </div>
-              </div>
 
-              {/* Publications issues d'événements datés hors de la plage :
-                  l'utilisateur leur attribue une date à la main. */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="plus"
+                      onClick={() => {
+                        setPDate(iso(activePlan.startDate));
+                        const planNetwork = activePlan.networks.find((n) =>
+                          preferredNetworks.includes(n),
+                        );
+                        setPNetwork(planNetwork ?? preferredNetworks[0] ?? '');
+                        setPostOpen(true);
+                      }}
+                    >
+                      Publication
+                    </Button>
+
+                    <span className="mx-0.5 h-5 w-px bg-line" aria-hidden />
+
+                    {EXPORTS.map((exp) => (
+                      <a
+                        key={exp.format}
+                        href={calendarApi.exportUrl(activePlan.id, exp.format)}
+                        title={exp.title}
+                        className={buttonClasses('ghost', 'sm')}
+                      >
+                        <Icon name="download" size={14} />
+                        {exp.label}
+                      </a>
+                    ))}
+
+                    <span className="mx-0.5 h-5 w-px bg-line" aria-hidden />
+
+                    {allPosts.length > 0 && (
+                      <IconButton
+                        icon="eraser"
+                        label="Vider le calendrier"
+                        size="sm"
+                        variant="danger"
+                        disabled={clearPosts.isPending}
+                        onClick={() => askClearPosts(activePlan)}
+                      />
+                    )}
+                    <IconButton
+                      icon="trash"
+                      label="Supprimer le calendrier"
+                      size="sm"
+                      variant="danger"
+                      disabled={deletePlan.isPending}
+                      onClick={() => askDeletePlan(activePlan)}
+                    />
+                  </div>
+                </div>
+              </Card>
+
               <ReschedulePanel
                 plan={activePlan}
-                posts={(activePlan.posts ?? []).filter((p) => p.needsReschedule)}
+                posts={allPosts.filter((p) => p.needsReschedule)}
               />
 
-              {(activePlan.posts?.length ?? 0) === 0 ? (
-                <EmptyState title="Aucune publication dans ce calendrier. Utilisez « ➕ Publication » pour en ajouter une." />
+              {allPosts.length === 0 ? (
+                <EmptyState
+                  icon="calendar"
+                  title="Ce calendrier est vide"
+                  description="Ajoutez une publication à la main, ou générez-en depuis vos événements."
+                />
               ) : (
-                <GlassPanel>
-                  {viewMode === 'list' && (
-                    <ListView
-                      posts={activePlan.posts!}
-                      onSelect={setSelectedPost}
-                      deletingId={deletingPostId}
-                      onDelete={(p) => {
-                        if (confirm(`Supprimer la publication « ${p.title} » ?`)) {
-                          deletePost.mutate(p.id);
-                        }
-                      }}
+                <Card className="flex flex-col gap-4">
+                  {/* Vue + filtre de statut */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <SegmentedControl
+                      options={[
+                        { value: 'list', label: 'Liste', icon: 'list' },
+                        { value: 'week', label: 'Semaine', icon: 'columns' },
+                        { value: 'month', label: 'Mois', icon: 'grid' },
+                      ]}
+                      value={viewMode}
+                      onChange={(v) => setViewMode(v as ViewMode)}
+                      ariaLabel="Mode d'affichage"
                     />
-                  )}
-                  {viewMode !== 'list' && (
-                    <PeriodNav
-                      label={periodLabel}
-                      onPrev={() => shiftAnchor(-1)}
-                      onNext={() => shiftAnchor(1)}
-                      onReset={() => setAnchor(null)}
-                      resetLabel={`Revenir au début du calendrier (${new Date(activePlan.startDate).toLocaleDateString('fr-FR')})`}
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Icon name="filter" size={14} className="text-content-muted" />
+                      <button
+                        type="button"
+                        onClick={() => setStatusFilter('ALL')}
+                        className={clsx(
+                          'rounded-full border px-2.5 py-0.5 text-2xs font-semibold transition-colors',
+                          statusFilter === 'ALL'
+                            ? 'border-line-strong bg-surface-2 text-content'
+                            : 'border-line text-content-muted hover:text-content',
+                        )}
+                      >
+                        Toutes ({allPosts.length})
+                      </button>
+                      {POST_STATUS.map((s) => (
+                        <button
+                          key={s.value}
+                          type="button"
+                          onClick={() => setStatusFilter(s.value)}
+                          className={clsx(
+                            'rounded-full border px-2.5 py-0.5 text-2xs font-semibold transition-colors',
+                            statusFilter === s.value
+                              ? 'border-line-strong bg-surface-2 text-content'
+                              : 'border-line text-content-muted hover:text-content',
+                          )}
+                        >
+                          {s.label} ({statusCounts[s.value]})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {visiblePosts.length === 0 ? (
+                    <EmptyState
+                      icon="filter"
+                      title="Aucune publication dans ce statut"
+                      description={`Aucune publication « ${POST_STATUS_LABEL[statusFilter as PostStatus]} » dans ce calendrier.`}
+                      action={
+                        <Button variant="ghost" onClick={() => setStatusFilter('ALL')}>
+                          Voir toutes les publications
+                        </Button>
+                      }
                     />
+                  ) : (
+                    <>
+                      {viewMode === 'list' && (
+                        <ListView
+                          posts={visiblePosts}
+                          onSelect={setSelectedPost}
+                          deletingId={deletingPostId}
+                          onDelete={askDeletePost}
+                        />
+                      )}
+                      {viewMode !== 'list' && (
+                        <>
+                          <PeriodNav
+                            label={periodLabel}
+                            onPrev={() => shiftAnchor(-1)}
+                            onNext={() => shiftAnchor(1)}
+                            onReset={() => setAnchor(null)}
+                            resetLabel={`Revenir au début du calendrier (${new Date(activePlan.startDate).toLocaleDateString('fr-FR')})`}
+                          />
+                          {viewMode === 'month' ? (
+                            <MonthView
+                              posts={visiblePosts}
+                              anchor={currentAnchor}
+                              onSelect={setSelectedPost}
+                            />
+                          ) : (
+                            <WeekView
+                              posts={visiblePosts}
+                              anchor={currentAnchor}
+                              onSelect={setSelectedPost}
+                            />
+                          )}
+                        </>
+                      )}
+                    </>
                   )}
-                  {viewMode === 'month' && (
-                    <MonthView posts={activePlan.posts!} anchor={currentAnchor} onSelect={setSelectedPost} />
-                  )}
-                  {viewMode === 'week' && (
-                    <WeekView posts={activePlan.posts!} anchor={currentAnchor} onSelect={setSelectedPost} />
-                  )}
-                </GlassPanel>
+
+                  <div className="border-t border-line pt-3">
+                    <StatusLegend />
+                  </div>
+                </Card>
               )}
             </motion.div>
           ) : null}
         </AnimatePresence>
       )}
 
-      <PostModal post={selectedPost} planId={activePlanId ?? ''} onClose={() => setSelectedPost(null)} />
+      <PostModal post={selectedPost} plan={activePlan ?? null} onClose={() => setSelectedPost(null)} />
 
-      {/* ─── Modale : modification du calendrier ─── */}
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Modifier le calendrier">
+      {/* ─── Modification du calendrier ─── */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Modifier le calendrier"
+        description="Les publications hors de la nouvelle plage sont conservées et signalées."
+        maxWidth="max-w-lg"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              icon="save"
+              onClick={() => updatePlan.mutate()}
+              loading={updatePlan.isPending}
+              disabled={!eName.trim() || !eStart || !eEnd || eEnd < eStart}
+            >
+              Enregistrer
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-secondary">
-            Choisissez la période couverte par ce calendrier. Les publications qui se retrouveraient
-            hors de la nouvelle plage sont conservées et signalées, pour que vous leur attribuiez
-            une date.
-          </p>
-          <Field label="Nom du calendrier">
-            <input className="glass-input" value={eName} onChange={(e) => setEName(e.target.value)} />
+          <Field label="Nom du calendrier" required>
+            <Input value={eName} onChange={(e) => setEName(e.target.value)} />
           </Field>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Début">
-              <input type="date" className="glass-input" value={eStart} onChange={(e) => setEStart(e.target.value)} />
+              <Input type="date" value={eStart} onChange={(e) => setEStart(e.target.value)} />
             </Field>
             <Field label="Fin">
-              <input type="date" className="glass-input" value={eEnd} onChange={(e) => setEEnd(e.target.value)} />
+              <Input type="date" value={eEnd} onChange={(e) => setEEnd(e.target.value)} />
             </Field>
           </div>
           {eStart && eEnd && eEnd < eStart && (
-            <p className="text-xs text-amber-500">La date de fin précède la date de début.</p>
+            <Alert tone="warning">La date de fin précède la date de début.</Alert>
           )}
-          <div className="flex justify-end gap-2">
-            <button className="btn-ghost text-sm" onClick={() => setEditOpen(false)}>
-              Annuler
-            </button>
-            <button
-              className="btn-primary text-sm flex items-center gap-2"
-              onClick={() => updatePlan.mutate()}
-              disabled={updatePlan.isPending || !eName.trim() || !eStart || !eEnd || eEnd < eStart}
-            >
-              {updatePlan.isPending ? <Spinner /> : '💾'} Enregistrer
-            </button>
-          </div>
         </div>
       </Modal>
 
-      {/* ─── Modale : ajout manuel d'une publication ─── */}
-      <Modal open={postOpen} onClose={() => setPostOpen(false)} title="Ajouter une publication">
+      {/* ─── Ajout manuel d'une publication ─── */}
+      <Modal
+        open={postOpen}
+        onClose={() => setPostOpen(false)}
+        title="Ajouter une publication"
+        description="Enregistrée telle quelle : aucun contenu n'est généré par l'IA."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPostOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              icon="plus"
+              onClick={() => createPost.mutate()}
+              loading={createPost.isPending}
+              disabled={!pTitle.trim() || !pNetwork}
+            >
+              Ajouter
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-secondary">
-            La publication est enregistrée telle quelle : aucun contenu n'est généré par l'IA.
-          </p>
-          <div className="grid sm:grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Date de publication">
-              <input type="date" className="glass-input" value={pDate} onChange={(e) => setPDate(e.target.value)} />
+              <Input
+                type="date"
+                value={pDate}
+                min={activePlan ? iso(activePlan.startDate) : undefined}
+                max={activePlan ? iso(activePlan.endDate) : undefined}
+                onChange={(e) => setPDate(e.target.value)}
+              />
             </Field>
-            <Field label="Réseau">
-              <select
-                className="glass-input"
-                value={pNetwork}
-                onChange={(e) => setPNetwork(e.target.value as Network)}
-              >
+            <Field label="Réseau" required>
+              <Select value={pNetwork} onChange={(e) => setPNetwork(e.target.value as Network)}>
                 {preferredNetworks.length === 0 && <option value="">Aucun réseau configuré</option>}
                 {preferredNetworks.map((n) => (
                   <option key={n} value={n}>
                     {NETWORK_LABEL[n]}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           </div>
-          <Field label="Titre">
-            <input
-              className="glass-input"
+          <Field label="Titre" required>
+            <Input
               value={pTitle}
               onChange={(e) => setPTitle(e.target.value)}
               placeholder="ex : Annonce de notre porte ouverte"
             />
           </Field>
           <Field label="Contenu">
-            <textarea
-              className="glass-input min-h-[140px] resize-y"
+            <Textarea
+              className="min-h-[9rem]"
               value={pContent}
               onChange={(e) => setPContent(e.target.value)}
               placeholder="Rédigez votre publication…"
             />
           </Field>
-          <Field label="Hashtags (optionnel)">
-            <input
-              className="glass-input"
+          <Field label="Hashtags" hint="Séparés par des espaces ou des virgules.">
+            <Input
               value={pHashtags}
               onChange={(e) => setPHashtags(e.target.value)}
               placeholder="#exemple #buzzy"
             />
           </Field>
-          <div className="flex justify-end gap-2">
-            <button className="btn-ghost text-sm" onClick={() => setPostOpen(false)}>
-              Annuler
-            </button>
-            <button
-              className="btn-primary text-sm flex items-center gap-2"
-              onClick={() => createPost.mutate()}
-              disabled={createPost.isPending || !pTitle.trim() || !pNetwork}
-            >
-              {createPost.isPending ? <Spinner /> : '➕'} Ajouter la publication
-            </button>
-          </div>
         </div>
       </Modal>
 
-      {/* ─── Modale : ajout manuel d'un événement (formulaire partagé) ─── */}
-      <ManualEventModal
-        open={manualOpen}
-        onClose={() => setManualOpen(false)}
-        onCreated={(ev) => {
+      <EventFormModal
+        open={eventFormOpen}
+        onClose={() => setEventFormOpen(false)}
+        onSaved={(ev) => {
           // Sur cette page, l'événement créé rejoint la sélection servant à la
           // génération du calendrier.
           toggle(ev.id);
@@ -677,6 +816,8 @@ export function CalendarPage() {
     </div>
   );
 }
+
+/* ─── Sélecteur de calendrier ──────────────────────────────────── */
 
 function PlanSelector({
   plans,
@@ -693,40 +834,53 @@ function PlanSelector({
   onDelete: (plan: PostPlan) => void;
   deletingId: string | null;
 }) {
-  if (loading) return <Skeleton />;
+  if (loading) return <Skeleton className="h-9 w-full max-w-sm" />;
   if (plans.length === 0) return null;
+
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-lg font-display font-semibold text-secondary">Mes calendriers</h2>
+      <h2 className="text-[13px] font-semibold text-content-2">Mes calendriers</h2>
       <div className="flex flex-wrap gap-2">
-        {plans.map((p) => (
-          <div
-            key={p.id}
-            className={`flex items-center rounded-xl ${
-              activePlanId === p.id ? 'btn-primary !p-0' : 'btn-ghost !p-0'
-            }`}
-          >
-            <button onClick={() => onSelect(p.id)} className="!py-2 !pl-4 !pr-2 text-sm">
-              {p.name}{' '}
-              <span className="opacity-60 text-xs">({p._count?.posts ?? p.posts?.length ?? 0})</span>
-            </button>
-            <button
-              onClick={() => onDelete(p)}
-              disabled={deletingId === p.id}
-              aria-label={`Supprimer le calendrier « ${p.name} »`}
-              title="Supprimer ce calendrier"
-              className="h-7 w-7 mr-1.5 rounded-lg flex items-center justify-center text-xs
-                         opacity-50 hover:opacity-100 hover:bg-red-500/20 transition-opacity disabled:opacity-30"
+        {plans.map((p) => {
+          const active = activePlanId === p.id;
+          return (
+            <div
+              key={p.id}
+              className={clsx(
+                'group flex items-center rounded-md border transition-colors',
+                active
+                  ? 'border-brand bg-brand-soft'
+                  : 'border-line bg-surface hover:border-line-strong',
+              )}
             >
-              {deletingId === p.id ? '…' : '🗑️'}
-            </button>
-          </div>
-        ))}
+              <button
+                type="button"
+                onClick={() => onSelect(p.id)}
+                aria-pressed={active}
+                className={clsx(
+                  'py-1.5 pl-3 pr-1.5 text-[13px] font-medium',
+                  active ? 'text-brand-text' : 'text-content-2',
+                )}
+              >
+                {p.name}
+                <span className="ml-1.5 text-2xs opacity-70">
+                  {p._count?.posts ?? p.posts?.length ?? 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(p)}
+                disabled={deletingId === p.id}
+                aria-label={`Supprimer le calendrier « ${p.name} »`}
+                title="Supprimer ce calendrier"
+                className="mr-1 flex h-6 w-6 items-center justify-center rounded text-content-muted opacity-0 transition-opacity hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+              >
+                <Icon name="trash" size={13} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
-}
-
-function Skeleton() {
-  return <div className="shimmer rounded-xl h-10 w-full max-w-sm" />;
 }

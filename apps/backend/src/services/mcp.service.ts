@@ -46,6 +46,22 @@ function safeToolName(serverIndex: number, toolName: string): string {
   return `mcp${serverIndex}__${clean}`;
 }
 
+/**
+ * Les fournisseurs compatibles OpenAI exigent un JSON Schema d'objet pour les
+ * paramètres d'un outil. Certains serveurs MCP renvoient un schéma partiel
+ * (sans `type`, sans `properties`), ce que l'API rejette en 400 — la
+ * génération entière échouerait à cause d'un seul outil mal décrit.
+ */
+function normalizeInputSchema(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return { type: 'object', properties: {} };
+  }
+  const s = { ...(schema as Record<string, unknown>) };
+  if (s.type !== 'object') s.type = 'object';
+  if (!s.properties || typeof s.properties !== 'object') s.properties = {};
+  return s;
+}
+
 async function buildTransport(server: McpServer, mode: 'http' | 'sse') {
   const url = new URL(server.url);
   const headerVal = authHeaderValue(server);
@@ -102,7 +118,7 @@ export async function connectMcpServer(
     name: safeToolName(serverIndex, t.name),
     originalName: t.name,
     description: t.description,
-    inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+    inputSchema: normalizeInputSchema(t.inputSchema),
   }));
 
   return {

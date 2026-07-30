@@ -106,3 +106,34 @@ export interface ModelInfo {
   /** `null` quand le fournisseur ne renseigne pas la capacité. */
   supportsTools: boolean | null;
 }
+
+/** État de santé fonctionnel de l'installation (Paramètres → Diagnostic). */
+export interface Diagnostics {
+  version: string;
+  ai: {
+    configured: boolean;
+    baseUrl: string | null;
+    model: string | null;
+    keyConfigured: boolean;
+    /** `false` signale presque toujours un ENCRYPTION_KEY modifié après coup. */
+    keyDecryptable: boolean | null;
+  };
+  profile: {
+    configured: boolean;
+    hasDescription: boolean;
+    preferredNetworks: Network[];
+  };
+  webSearch: {
+    registered: number;
+    enabled: number;
+    servers: {
+      id: string;
+      name: string;
+      url: string;
+      reachable: boolean;
+      toolCount: number;
+      error?: string;
+    }[];
+  };
+  content: { events: number; calendars: number };
+}

@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import clsx from 'clsx';
 import type { Network } from '../lib/types';
 import { NETWORK_LABEL } from '../lib/constants';
 
@@ -15,31 +15,78 @@ const PATHS: Record<Network, string> = {
     'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z',
 };
 
-/** Couleur de marque ; X s'adapte au thème (noir/blanc). */
-const BRAND: Record<Network, string> = {
+/** Couleur de marque ; X s'adapte au thème (noir en clair, blanc en sombre). */
+export const NETWORK_BRAND: Record<Network, string> = {
   facebook: '#1877F2',
   instagram: '#E1306C',
   linkedin: '#0A66C2',
-  x: 'var(--text-primary)',
+  x: 'var(--text)',
   tiktok: '#00C4B4',
 };
 
-export function NetworkIcon({ network, size = 32 }: { network: Network; size?: number }) {
+/**
+ * Couleur lisible SUR la couleur de marque.
+ *
+ * Blanc convient partout sauf pour X, dont la « couleur » suit le thème :
+ * en mode sombre elle est quasi blanche, et une coche blanche y disparaît.
+ */
+const NETWORK_ON_BRAND: Record<Network, string> = {
+  facebook: '#ffffff',
+  instagram: '#ffffff',
+  linkedin: '#ffffff',
+  x: 'var(--surface)',
+  tiktok: '#ffffff',
+};
+
+export function NetworkIcon({
+  network,
+  size = 18,
+  colored = true,
+  className,
+}: {
+  network: Network;
+  size?: number;
+  /** `false` pour hériter de la couleur du texte environnant. */
+  colored?: boolean;
+  className?: string;
+}) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={BRAND[network]}
+      fill={colored ? NETWORK_BRAND[network] : 'currentColor'}
+      className={className}
+      style={{ flexShrink: 0 }}
       aria-hidden
-      role="img"
+      focusable="false"
     >
       <path d={PATHS[network]} />
     </svg>
   );
 }
 
-/** Sélecteur multiple de réseaux, avec logos plus grands. */
+/** Logo + nom du réseau, format compact pour les listes et en-têtes. */
+export function NetworkLabel({
+  network,
+  size = 14,
+  colored = true,
+  className,
+}: {
+  network: Network;
+  size?: number;
+  colored?: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={clsx('inline-flex items-center gap-1.5', className)}>
+      <NetworkIcon network={network} size={size} colored={colored} />
+      {NETWORK_LABEL[network]}
+    </span>
+  );
+}
+
+/** Sélecteur multiple de réseaux. */
 export function NetworkSelector({
   networks,
   selected,
@@ -50,36 +97,49 @@ export function NetworkSelector({
   onToggle: (n: Network) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="flex flex-wrap gap-2">
       {networks.map((n) => {
         const isOn = selected.includes(n);
         return (
-          <motion.button
+          <button
             key={n}
             type="button"
             onClick={() => onToggle(n)}
             aria-pressed={isOn}
-            whileHover={{ y: -4 }}
-            whileTap={{ scale: 0.96 }}
-            className="relative flex flex-col items-center justify-center gap-2 rounded-2xl border p-3 w-24 h-24 transition-colors"
-            style={{
-              background: isOn ? 'var(--glass-bg-strong)' : 'var(--glass-bg)',
-              borderColor: isOn ? BRAND[n] : 'var(--glass-border)',
-              boxShadow: isOn ? `0 0 0 2px ${BRAND[n]}, 0 10px 26px -10px ${BRAND[n]}` : 'none',
-              opacity: isOn ? 1 : 0.72,
-            }}
+            className={clsx(
+              'relative flex h-[4.5rem] w-[4.5rem] flex-col items-center justify-center gap-1.5',
+              'rounded-lg border text-2xs font-medium transition-all duration-150',
+              isOn
+                ? 'border-transparent bg-surface-2 text-content shadow-sm'
+                : 'border-line bg-surface text-content-muted hover:border-line-strong hover:text-content-2',
+            )}
+            // La couleur de marque n'apparaît qu'à l'état sélectionné : cinq
+            // logos colorés côte à côte rendraient l'état actif illisible.
+            style={isOn ? { boxShadow: `inset 0 0 0 2px ${NETWORK_BRAND[n]}` } : undefined}
           >
             {isOn && (
               <span
-                className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-[11px] text-white"
-                style={{ background: BRAND[n] }}
+                className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full"
+                style={{ background: NETWORK_BRAND[n], color: NETWORK_ON_BRAND[n] }}
               >
-                ✓
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="m20 6-11 11-5-5" />
+                </svg>
               </span>
             )}
-            <NetworkIcon network={n} size={34} />
-            <span className="text-xs font-medium">{NETWORK_LABEL[n]}</span>
-          </motion.button>
+            <NetworkIcon network={n} size={24} colored={isOn} />
+            {NETWORK_LABEL[n]}
+          </button>
         );
       })}
     </div>

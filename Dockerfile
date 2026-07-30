@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────
 # Buzzy — Dockerfile multi-stage
 # 1. build-frontend : build Vite → dist
-# 2. build-backend  : compilation TypeScript + génération Prisma
+# 2. build-backend  : compilation TypeScript
 # 3. prod-deps      : dépendances d'exécution seules (image légère)
 # 4. final          : image Node légère servant API + statique
 # ─────────────────────────────────────────────────────────────────
@@ -14,6 +14,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY apps/backend/package.json apps/backend/
 COPY apps/frontend/package.json apps/frontend/
+# Le schéma Prisma doit précéder `npm install` : le postinstall de la racine
+# génère le client, et échouerait sans lui.
+COPY apps/backend/prisma apps/backend/prisma
 RUN npm install
 
 # ─── Stage 1 : build du frontend ────────────────────────────────
@@ -22,11 +25,11 @@ WORKDIR /app
 COPY apps/frontend apps/frontend
 RUN npm run build -w apps/frontend
 
-# ─── Stage 2 : build du backend + Prisma ────────────────────────
+# ─── Stage 2 : build du backend ─────────────────────────────────
+# Le client Prisma a déjà été généré par le postinstall du stage `deps`.
 FROM deps AS build-backend
 WORKDIR /app
 COPY apps/backend apps/backend
-RUN npm run prisma:generate -w apps/backend
 RUN npm run build -w apps/backend
 
 # ─── Stage 3 : dépendances d'exécution seules ───────────────────
@@ -42,10 +45,12 @@ RUN apk add --no-cache openssl python3 make g++
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY apps/backend/package.json apps/backend/
+# Idem : le postinstall régénère le client Prisma dans CET arbre de modules.
+COPY apps/backend/prisma apps/backend/prisma
 RUN npm install --omit=dev --workspace apps/backend --include-workspace-root \
  && npm cache clean --force
-# Le client Prisma doit être régénéré dans cet arbre-ci.
-COPY apps/backend/prisma apps/backend/prisma
+# Filet de sécurité : un client Prisma manquant ne se verrait qu'au démarrage
+# du conteneur. `generate` est idempotent, on le rejoue explicitement.
 RUN npx prisma generate --schema apps/backend/prisma/schema.prisma
 
 # ─── Stage 4 : image finale de production ───────────────────────

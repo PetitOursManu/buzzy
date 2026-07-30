@@ -38,6 +38,17 @@ export interface Frequency {
   count: number;
 }
 
+/**
+ * Heure de publication normalisée (10h). Une publication replacée au « début
+ * du calendrier » hériterait sinon de l'heure brute de la plage — souvent
+ * minuit, ce qui la place à part dans les vues Semaine et Liste.
+ */
+export function atPublishingHour(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(10, 0, 0, 0);
+  return d;
+}
+
 export interface CalendarGenerationInput {
   name?: string;
   startDate: Date;
@@ -55,16 +66,20 @@ export interface CalendarGenerationInput {
 }
 
 /**
+ * Nombre maximal de créneaux calculés. Ces dates ne servent que de réserve
+ * pour les événements sans date exploitable : au-delà de quelques centaines,
+ * elles ne seront jamais consommées. Sans ce plafond, « 50 par jour » sur un
+ * an produirait 18 000 objets Date pour rien.
+ */
+const MAX_SCHEDULE_SLOTS = 500;
+
+/**
  * Calcule les dates de publication réparties sur la plage selon la fréquence.
  * - day: `count` publications par jour
  * - week: `count` publications par semaine (réparties)
  * - month: `count` publications par mois (réparties)
  */
-export function computeScheduleDates(
-  start: Date,
-  end: Date,
-  freq: Frequency,
-): Date[] {
+export function computeScheduleDates(start: Date, end: Date, freq: Frequency): Date[] {
   const dates: Date[] = [];
   const startMs = new Date(start).setHours(9, 0, 0, 0);
   const endMs = new Date(end).setHours(23, 59, 59, 999);
@@ -75,8 +90,8 @@ export function computeScheduleDates(
 
   if (freq.type === 'day') {
     // count publications réparties dans chaque journée (heures ouvrées 9h-18h).
-    for (let d = 0; d < totalDays; d++) {
-      for (let k = 0; k < count; k++) {
+    for (let d = 0; d < totalDays && dates.length < MAX_SCHEDULE_SLOTS; d++) {
+      for (let k = 0; k < count && dates.length < MAX_SCHEDULE_SLOTS; k++) {
         const day = new Date(startMs + d * 24 * 3600 * 1000);
         const hour = count === 1 ? 10 : Math.round(9 + (k * 9) / Math.max(1, count - 1));
         day.setHours(Math.min(18, hour), 0, 0, 0);
@@ -89,10 +104,10 @@ export function computeScheduleDates(
   // week / month : on répartit `count` publications par période, également espacées.
   const periodMs = freq.type === 'week' ? 7 * 24 * 3600 * 1000 : 30 * 24 * 3600 * 1000;
   let periodStart = startMs;
-  while (periodStart <= endMs) {
+  while (periodStart <= endMs && dates.length < MAX_SCHEDULE_SLOTS) {
     const periodEnd = Math.min(periodStart + periodMs - 1, endMs);
     const span = periodEnd - periodStart;
-    for (let k = 0; k < count; k++) {
+    for (let k = 0; k < count && dates.length < MAX_SCHEDULE_SLOTS; k++) {
       const frac = count === 1 ? 0.4 : k / (count - 1);
       const ts = periodStart + Math.round(span * frac);
       const dt = new Date(ts);
@@ -144,7 +159,8 @@ function assignEventDates(
 
   // Créneaux de repli, consommés dans l'ordre par les événements sans date
   // exploitable. On boucle si les événements sont plus nombreux.
-  const fallbacks = scheduleDates.length > 0 ? scheduleDates : [new Date(startMs)];
+  const fallbacks =
+    scheduleDates.length > 0 ? scheduleDates : [atPublishingHour(new Date(startMs))];
   let fallbackCursor = 0;
 
   const nextFallback = () => {

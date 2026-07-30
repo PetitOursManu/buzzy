@@ -14,9 +14,80 @@ import {
 } from './schemas';
 import { listModels, AiRequestError } from '../services/ai-provider.service';
 import { testMcpServer } from '../services/mcp.service';
+import { APP_VERSION } from '../lib/version';
 
 const router = Router();
 router.use(requireAuth);
+
+/* ─── Diagnostic de l'installation ────────────────────────────── */
+
+/**
+ * État de santé fonctionnel de l'installation.
+ *
+ * Répond à la question que se pose tout utilisateur qui vient de déployer
+ * Buzzy : « qu'est-ce qu'il me reste à configurer ? ». Chaque contrôle est
+ * indépendant et ne fait jamais échouer la réponse.
+ */
+router.get('/diagnostics', async (_req, res) => {
+  const [provider, profile, mcpServers, eventCount, planCount] = await Promise.all([
+    prisma.aiProvider.findFirst({ orderBy: { updatedAt: 'desc' } }),
+    prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } }),
+    prisma.mcpServer.findMany({ orderBy: { createdAt: 'asc' } }),
+    prisma.event.count(),
+    prisma.postPlan.count(),
+  ]);
+
+  const enabledServers = mcpServers.filter((s) => s.enabled);
+
+  // On ne teste que les serveurs activés : ce sont les seuls dont une panne
+  // dégrade réellement la génération.
+  const mcpResults = await Promise.all(
+    enabledServers.map(async (server) => {
+      const result = await testMcpServer(server);
+      return {
+        id: server.id,
+        name: server.name,
+        url: server.url,
+        reachable: result.ok,
+        toolCount: result.tools.length,
+        error: result.error,
+      };
+    }),
+  );
+
+  return res.json({
+    version: APP_VERSION,
+    ai: {
+      configured: !!provider,
+      baseUrl: provider?.baseUrl ?? null,
+      model: provider?.selectedModel ?? null,
+      keyConfigured: !!provider?.apiKeyEncrypted,
+      // Une clé indéchiffrable signale presque toujours un ENCRYPTION_KEY
+      // modifié après coup : la cause est invisible sans ce contrôle.
+      keyDecryptable: provider?.apiKeyEncrypted ? canDecrypt(provider.apiKeyEncrypted) : null,
+    },
+    profile: {
+      configured: !!profile,
+      hasDescription: !!profile?.description?.trim(),
+      preferredNetworks: profile?.preferredNetworks ?? [],
+    },
+    webSearch: {
+      registered: mcpServers.length,
+      enabled: enabledServers.length,
+      servers: mcpResults,
+    },
+    content: { events: eventCount, calendars: planCount },
+  });
+});
+
+function canDecrypt(payload: string): boolean {
+  try {
+    decrypt(payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /* ─── Compte / Sécurité ───────────────────────────────────────── */
 

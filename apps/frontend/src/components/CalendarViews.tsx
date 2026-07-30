@@ -1,12 +1,14 @@
 import { motion } from 'framer-motion';
-import type { PostItem } from '../lib/types';
-import { NETWORK_EMOJI, NETWORK_LABEL } from '../lib/constants';
+import clsx from 'clsx';
+import type { PostItem, PostStatus } from '../lib/types';
+import { NETWORK_LABEL, POST_STATUS_LABEL, POST_STATUS_TONE } from '../lib/constants';
+import { Badge, IconButton } from './ui';
+import { Icon } from './icons';
+import { NetworkIcon } from './NetworkIcon';
 
 function sameDay(a: Date, b: Date) {
   return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
   );
 }
 
@@ -18,10 +20,15 @@ export function startOfWeek(d: Date): Date {
   return start;
 }
 
-/**
- * Barre de navigation des vues Mois et Semaine : période précédente, suivante,
- * et retour à la période d'origine du calendrier.
- */
+/** Liseré de couleur signalant le statut d'une publication en un coup d'œil. */
+const STATUS_BAR: Record<PostStatus, string> = {
+  DRAFT: 'bg-line-strong',
+  APPROVED: 'bg-accent',
+  PUBLISHED: 'bg-success',
+};
+
+/* ─── Navigation de période ────────────────────────────────────── */
+
 export function PeriodNav({
   label,
   onPrev,
@@ -36,57 +43,45 @@ export function PeriodNav({
   resetLabel: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 mb-4">
-      <button
-        onClick={onPrev}
-        aria-label="Période précédente"
-        title="Période précédente"
-        className="btn-ghost !py-1.5 !px-3 text-lg leading-none"
-      >
-        ‹
-      </button>
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <IconButton icon="chevron-left" label="Période précédente" size="sm" onClick={onPrev} />
 
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="font-display font-semibold capitalize truncate">{label}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate font-display text-sm capitalize">{label}</span>
         <button
+          type="button"
           onClick={onReset}
           title={resetLabel}
-          className="btn-ghost !py-1 !px-2 text-xs whitespace-nowrap"
+          className="whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs text-content-muted transition-colors hover:bg-surface-2 hover:text-content"
         >
-          ⤺ Début
+          Début
         </button>
       </div>
 
-      <button
-        onClick={onNext}
-        aria-label="Période suivante"
-        title="Période suivante"
-        className="btn-ghost !py-1.5 !px-3 text-lg leading-none"
-      >
-        ›
-      </button>
+      <IconButton icon="chevron-right" label="Période suivante" size="sm" onClick={onNext} />
     </div>
   );
 }
 
+/* ─── Pastille de publication (vues Mois / Semaine) ────────────── */
+
 export function PostChip({ post, onClick }: { post: PostItem; onClick: () => void }) {
   return (
-    <motion.button
-      layout
-      whileHover={{ y: -2, scale: 1.01 }}
+    <button
+      type="button"
       onClick={onClick}
-      className="glass rounded-lg px-2 py-1.5 text-left w-full text-xs flex flex-col gap-0.5 hover:shadow-glow-grape transition-shadow"
-      title={post.title}
+      title={`${NETWORK_LABEL[post.network]} — ${post.title}`}
+      className="flex w-full items-center gap-1.5 overflow-hidden rounded-md border border-line bg-surface px-1.5 py-1 text-left text-2xs transition-colors hover:border-line-strong hover:bg-surface-2"
     >
-      <span className="flex items-center gap-1">
-        <span aria-hidden>{NETWORK_EMOJI[post.network]}</span>
-        <span className="font-medium truncate">{post.title}</span>
-      </span>
-    </motion.button>
+      <span className={clsx('h-3 w-0.5 shrink-0 rounded-full', STATUS_BAR[post.status])} />
+      <NetworkIcon network={post.network} size={11} />
+      <span className="truncate font-medium">{post.title}</span>
+    </button>
   );
 }
 
 /* ─── Vue Liste ────────────────────────────────────────────────── */
+
 export function ListView({
   posts,
   onSelect,
@@ -99,58 +94,69 @@ export function ListView({
   deletingId?: string | null;
 }) {
   const grouped = posts.reduce<Record<string, PostItem[]>>((acc, p) => {
-    const key = new Date(p.scheduledDate).toISOString().slice(0, 10);
+    // Clé locale (et non ISO/UTC) : une publication à 00h30 heure de Paris
+    // tomberait sinon dans la journée précédente.
+    const d = new Date(p.scheduledDate);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     (acc[key] ??= []).push(p);
     return acc;
   }, {});
   const days = Object.keys(grouped).sort();
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {days.map((day) => (
         <div key={day} className="flex flex-col gap-2">
-          <h3 className="text-sm font-display font-semibold text-secondary">
-            {new Date(day).toLocaleDateString('fr-FR', {
+          <h3 className="flex items-center gap-2 text-[13px] font-semibold capitalize text-content-2">
+            {new Date(`${day}T12:00:00`).toLocaleDateString('fr-FR', {
               weekday: 'long',
               day: 'numeric',
               month: 'long',
             })}
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-2xs font-normal text-content-muted">
+              {grouped[day].length} publication{grouped[day].length > 1 ? 's' : ''}
+            </span>
           </h3>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {grouped[day].map((p) => (
               <motion.div
                 key={p.id}
                 layout
-                whileHover={{ y: -3 }}
-                className="glass rounded-xl relative group hover:shadow-glow-grape transition-shadow"
+                className="group relative flex overflow-hidden rounded-lg border border-line bg-surface transition-shadow hover:shadow-md"
               >
+                <span className={clsx('w-1 shrink-0', STATUS_BAR[p.status])} aria-hidden />
                 <button
                   onClick={() => onSelect(p)}
-                  className="p-3 text-left flex flex-col gap-1.5 w-full"
+                  className="flex w-full flex-col gap-1.5 p-3 text-left"
                 >
-                  <span className="flex items-center gap-1.5 text-xs text-muted">
-                    {NETWORK_EMOJI[p.network]} {NETWORK_LABEL[p.network]}
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-content-muted">
+                      <NetworkIcon network={p.network} size={13} />
+                      {NETWORK_LABEL[p.network]}
+                    </span>
+                    <Badge tone={POST_STATUS_TONE[p.status]}>{POST_STATUS_LABEL[p.status]}</Badge>
                   </span>
-                  <span className="font-medium text-sm pr-6">{p.title}</span>
-                  <span className="text-xs text-secondary line-clamp-2">{p.content}</span>
+                  <span className="pr-6 text-sm font-medium leading-snug">{p.title}</span>
+                  <span className="clamp-2 text-xs leading-relaxed text-content-2">{p.content}</span>
                   {p.hashtags.length > 0 && (
-                    <span className="text-xs text-[color:var(--grape)] truncate">
+                    <span className="truncate text-xs text-accent-text">
                       {p.hashtags.map((h) => `#${h}`).join(' ')}
                     </span>
                   )}
                 </button>
                 {onDelete && (
-                  <button
-                    onClick={() => onDelete(p)}
-                    disabled={deletingId === p.id}
-                    aria-label={`Supprimer la publication « ${p.title} »`}
-                    title="Supprimer cette publication"
-                    className="absolute top-2 right-2 h-7 w-7 rounded-lg flex items-center justify-center text-sm
-                               opacity-0 group-hover:opacity-100 focus-visible:opacity-100
-                               hover:bg-red-500/15 text-red-500 transition-opacity disabled:opacity-50"
-                  >
-                    {deletingId === p.id ? '…' : '🗑️'}
-                  </button>
+                  <div className="absolute bottom-2 right-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                    <IconButton
+                      icon="trash"
+                      label={`Supprimer « ${p.title} »`}
+                      size="sm"
+                      variant="danger"
+                      disabled={deletingId === p.id}
+                      onClick={() => onDelete(p)}
+                    />
+                  </div>
                 )}
               </motion.div>
             ))}
@@ -162,6 +168,9 @@ export function ListView({
 }
 
 /* ─── Vue Mois ─────────────────────────────────────────────────── */
+
+const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+
 export function MonthView({
   posts,
   anchor,
@@ -180,51 +189,71 @@ export function MonthView({
   for (let i = 0; i < startWeekday; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
 
-  const weekdayLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  const today = new Date();
 
   return (
-    <div>
-      <div className="grid grid-cols-7 gap-2 mb-2">
-        {weekdayLabels.map((w) => (
-          <div key={w} className="text-center text-xs font-semibold text-muted">
-            {w}
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-2">
-        {cells.map((date, i) => {
-          const dayPosts = date ? posts.filter((p) => sameDay(new Date(p.scheduledDate), date)) : [];
-          return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[44rem]">
+        <div className="mb-1.5 grid grid-cols-7 gap-1.5">
+          {WEEKDAYS.map((w) => (
             <div
-              key={i}
-              className={
-                date
-                  ? 'glass rounded-xl p-1.5 min-h-[90px] flex flex-col gap-1'
-                  : 'rounded-xl min-h-[90px] opacity-30'
-              }
+              key={w}
+              className="text-center text-2xs font-semibold uppercase tracking-wide text-content-muted"
             >
-              {date && (
-                <>
-                  <span className="text-xs text-muted font-medium px-1">{date.getDate()}</span>
-                  <div className="flex flex-col gap-1 overflow-hidden">
-                    {dayPosts.slice(0, 3).map((p) => (
-                      <PostChip key={p.id} post={p} onClick={() => onSelect(p)} />
-                    ))}
-                    {dayPosts.length > 3 && (
-                      <span className="text-[10px] text-muted px-1">+{dayPosts.length - 3} autre(s)</span>
-                    )}
-                  </div>
-                </>
-              )}
+              {w}
             </div>
-          );
-        })}
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1.5">
+          {cells.map((date, i) => {
+            const dayPosts = date
+              ? posts.filter((p) => sameDay(new Date(p.scheduledDate), date))
+              : [];
+            const isToday = date ? sameDay(date, today) : false;
+
+            return (
+              <div
+                key={i}
+                className={clsx(
+                  'flex min-h-[6rem] flex-col gap-1 rounded-lg p-1.5',
+                  date ? 'border border-line bg-surface' : 'bg-transparent',
+                  isToday && 'border-brand ring-1 ring-brand/30',
+                )}
+              >
+                {date && (
+                  <>
+                    <span
+                      className={clsx(
+                        'px-0.5 text-2xs font-semibold tabular-nums',
+                        isToday ? 'text-brand-text' : 'text-content-muted',
+                      )}
+                    >
+                      {date.getDate()}
+                    </span>
+                    <div className="flex flex-col gap-1 overflow-hidden">
+                      {dayPosts.slice(0, 3).map((p) => (
+                        <PostChip key={p.id} post={p} onClick={() => onSelect(p)} />
+                      ))}
+                      {dayPosts.length > 3 && (
+                        <span className="px-1 text-2xs text-content-muted">
+                          +{dayPosts.length - 3} autre{dayPosts.length - 3 > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
 /* ─── Vue Semaine ──────────────────────────────────────────────── */
+
 export function WeekView({
   posts,
   anchor,
@@ -234,31 +263,65 @@ export function WeekView({
   anchor: Date;
   onSelect: (p: PostItem) => void;
 }) {
-  const start = new Date(anchor);
-  start.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7)); // lundi
+  const start = startOfWeek(anchor);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
     return d;
   });
+  const today = new Date();
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-7">
       {days.map((date, i) => {
         const dayPosts = posts.filter((p) => sameDay(new Date(p.scheduledDate), date));
+        const isToday = sameDay(date, today);
+
         return (
-          <div key={i} className="glass rounded-xl p-2 min-h-[140px] flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-secondary">
+          <div
+            key={i}
+            className={clsx(
+              'flex min-h-[8rem] flex-col gap-1.5 rounded-lg border bg-surface p-2',
+              isToday ? 'border-brand ring-1 ring-brand/30' : 'border-line',
+            )}
+          >
+            <span
+              className={clsx(
+                'text-2xs font-semibold uppercase tracking-wide',
+                isToday ? 'text-brand-text' : 'text-content-muted',
+              )}
+            >
               {date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })}
             </span>
             <div className="flex flex-col gap-1">
-              {dayPosts.map((p) => (
-                <PostChip key={p.id} post={p} onClick={() => onSelect(p)} />
-              ))}
+              {dayPosts.length === 0 ? (
+                <span className="py-2 text-center text-2xs text-content-muted">—</span>
+              ) : (
+                dayPosts.map((p) => <PostChip key={p.id} post={p} onClick={() => onSelect(p)} />)
+              )}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ─── Légende des statuts ──────────────────────────────────────── */
+
+export function StatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-2xs text-content-muted">
+      <span className="inline-flex items-center gap-1.5">
+        <Icon name="info" size={12} />
+        Statuts :
+      </span>
+      {(Object.keys(STATUS_BAR) as PostStatus[]).map((status) => (
+        <span key={status} className="inline-flex items-center gap-1.5">
+          <span className={clsx('h-2.5 w-1 rounded-full', STATUS_BAR[status])} />
+          {POST_STATUS_LABEL[status]}
+        </span>
+      ))}
     </div>
   );
 }

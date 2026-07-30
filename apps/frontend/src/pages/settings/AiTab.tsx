@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, ApiError } from '../../lib/api';
-import { Field, GlassPanel, Spinner } from '../../components/ui';
+import { Alert, Button, Card, Field, Input, Select } from '../../components/ui';
+import { Icon } from '../../components/icons';
 import { useToast } from '../../hooks/useToast';
 import type { ModelInfo, ReasoningEffort } from '../../lib/types';
 
@@ -10,6 +11,15 @@ const EFFORT_OPTIONS: { value: ReasoningEffort; label: string }[] = [
   { value: 'low', label: 'Faible' },
   { value: 'medium', label: 'Moyen' },
   { value: 'high', label: 'Élevé' },
+];
+
+/** Fournisseurs courants, pour éviter de chercher l'URL de base dans la doc. */
+const PROVIDER_PRESETS: { name: string; baseUrl: string; hint: string }[] = [
+  { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', hint: 'Catalogue multi-modèles' },
+  { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', hint: 'GPT' },
+  { name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', hint: 'Mistral AI' },
+  { name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', hint: 'Inférence rapide' },
+  { name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', hint: 'Sans clé API' },
 ];
 
 export function AiTab() {
@@ -51,9 +61,9 @@ export function AiTab() {
         toast(`URL de base ajustée : ${data.baseUrl}`, 'info');
       }
       if (data.models.length === 0) {
-        toast(data.warning ?? 'Aucun modèle listé. Saisissez son identifiant à la main.', 'info');
+        toast(data.warning ?? "Aucun modèle listé. Saisissez son identifiant à la main.", 'info');
       } else {
-        toast(`${data.models.length} modèle(s) disponible(s).`, 'success');
+        toast(`Connexion réussie — ${data.models.length} modèle(s) disponible(s).`, 'success');
         if (!selectedModel && data.models[0]) setSelectedModel(data.models[0].id);
       }
     },
@@ -72,158 +82,191 @@ export function AiTab() {
     onSuccess: () => {
       setApiKey('');
       queryClient.invalidateQueries({ queryKey: ['ai-provider'] });
+      queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
       toast('Configuration IA enregistrée.', 'success');
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Enregistrement impossible.', 'error'),
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Enregistrement impossible.', 'error'),
   });
 
+  const applyPreset = (preset: (typeof PROVIDER_PRESETS)[number]) => {
+    setName(preset.name);
+    setBaseUrl(preset.baseUrl);
+    setModels([]);
+  };
+
   return (
-    <GlassPanel className="flex flex-col gap-5 max-w-2xl">
-      <div>
-        <h2 className="text-xl font-display font-semibold">Modèle IA</h2>
-        <p className="text-secondary text-sm mt-1">
-          Connectez une API compatible OpenAI (OpenRouter, Ollama Cloud, OpenAI…).
-        </p>
-      </div>
+    <div className="flex max-w-3xl flex-col gap-4">
+      <Card className="flex flex-col gap-5">
+        <div>
+          <h2 className="font-display text-lg">Modèle IA</h2>
+          <p className="mt-1 text-sm text-content-2">
+            Connectez une API compatible OpenAI. Buzzy n'appelle que{' '}
+            <code className="font-mono text-xs">/models</code> et{' '}
+            <code className="font-mono text-xs">/chat/completions</code>.
+          </p>
+        </div>
 
-      <Field label="Nom du fournisseur">
-        <input className="glass-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="ex : OpenRouter" />
-      </Field>
+        <Field label="Fournisseurs courants" hint="Pré-remplit le nom et l'URL de base.">
+          <div className="flex flex-wrap gap-1.5">
+            {PROVIDER_PRESETS.map((preset) => (
+              <button
+                key={preset.name}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                title={`${preset.hint} — ${preset.baseUrl}`}
+                className="rounded-md border border-line bg-surface px-2.5 py-1 text-[13px] text-content-2 transition-colors hover:border-line-strong hover:text-content"
+              >
+                {preset.name}
+              </button>
+            ))}
+          </div>
+        </Field>
 
-      <Field label="URL de base de l'API" hint="Doit se terminer par /v1 en général.">
-        <input
-          className="glass-input"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://openrouter.ai/api/v1"
-        />
-      </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Nom du fournisseur">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="ex : OpenRouter"
+            />
+          </Field>
+          <Field label="URL de base de l'API" hint="Se termine généralement par /v1.">
+            <Input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://openrouter.ai/api/v1"
+              spellCheck={false}
+            />
+          </Field>
+        </div>
 
-      <Field
-        label="Clé API"
-        hint={provider?.keyConfigured ? `Clé configurée (••••${provider.keyLast4}). Laissez vide pour la conserver.` : 'La clé est chiffrée en base et jamais renvoyée en clair.'}
-      >
-        <input
-          type="password"
-          className="glass-input"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder={provider?.keyConfigured ? '••••••••••••' : 'sk-…'}
-          autoComplete="off"
-        />
-      </Field>
-
-      <div>
-        <button
-          className="btn-ghost flex items-center gap-2 text-sm"
-          onClick={() => listModels.mutate()}
-          disabled={listModels.isPending || !baseUrl}
+        <Field
+          label="Clé API"
+          hint={
+            provider?.keyConfigured
+              ? `Clé enregistrée (••••${provider.keyLast4}). Laissez vide pour la conserver.`
+              : 'Chiffrée en base (AES-256-GCM) et jamais renvoyée en clair.'
+          }
         >
-          {listModels.isPending ? <Spinner /> : '🔌'} Tester la connexion et lister les modèles
-        </button>
-      </div>
+          <Input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={provider?.keyConfigured ? '••••••••••••' : 'sk-…'}
+            autoComplete="off"
+          />
+        </Field>
 
-      {/* ─── Choix du modèle : saisie libre, suggestions si listées ─── */}
-      <Field
-        label="Modèle utilisé"
-        hint={
-          models.length > 0
-            ? `Choisissez parmi les ${models.length} modèles listés, ou saisissez librement un autre identifiant.`
-            : "Saisissez l'identifiant exact du modèle, tel que votre fournisseur l'attend."
-        }
-      >
-        <input
-          className="glass-input"
-          list="buzzy-models"
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-          placeholder="ex : mistralai/mistral-large, gpt-4o, qwen3:14b…"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <datalist id="buzzy-models">
-          {models.map((m) => (
-            <option key={m.id} value={m.id} />
-          ))}
-        </datalist>
+        <div>
+          <Button
+            variant="secondary"
+            icon="network"
+            onClick={() => listModels.mutate()}
+            loading={listModels.isPending}
+            disabled={!baseUrl}
+          >
+            Tester la connexion et lister les modèles
+          </Button>
+        </div>
 
-        {/* Ce que le fournisseur annonce du modèle saisi. */}
-        {currentModelInfo?.supportsTools === true && (
-          <p className="text-xs text-emerald-500 mt-2">
-            ✅ Ce modèle annonce la prise en charge des tools.
-          </p>
-        )}
-        {currentModelInfo?.supportsTools === false && (
-          <p className="text-xs text-red-500 mt-2">
-            ⛔ Ce modèle n'annonce <strong>pas</strong> la prise en charge des tools : la recherche
-            web via MCP ne fonctionnera pas avec lui.
-          </p>
-        )}
-        {selectedModel.trim() && !currentModelInfo && models.length > 0 && (
-          <p className="text-xs text-muted mt-2">
-            Modèle absent de la liste du fournisseur : Buzzy l'utilisera tel quel, sans pouvoir
-            vérifier ses capacités.
-          </p>
-        )}
-      </Field>
+        <Field
+          label="Modèle utilisé"
+          hint={
+            models.length > 0
+              ? `Choisissez parmi les ${models.length} modèles listés, ou saisissez un autre identifiant.`
+              : "Saisissez l'identifiant exact attendu par votre fournisseur."
+          }
+        >
+          <Input
+            list="buzzy-models"
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            placeholder="ex : mistralai/mistral-large, gpt-4o, qwen3:14b…"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <datalist id="buzzy-models">
+            {models.map((m) => (
+              <option key={m.id} value={m.id} />
+            ))}
+          </datalist>
 
-      {/* ─── Exigence : accès aux tools ─── */}
-      <div className="glass rounded-xl p-4 flex flex-col gap-2 border border-amber-500/40">
-        <h3 className="text-sm font-display font-semibold flex items-center gap-2">
-          <span aria-hidden>🔧</span> Le modèle doit avoir accès aux tools
-        </h3>
-        <p className="text-sm text-secondary">
-          Buzzy interroge le web via des serveurs <strong>MCP</strong>, et cela passe par l'appel
-          d'outils (<em>tools</em>, aussi appelé <em>function calling</em>). Un modèle qui ne le
-          prend pas en charge ne pourra pas chercher sur le web : il inventerait des événements au
-          lieu de les trouver, ce que Buzzy refuse de faire — vous obtiendriez donc des résultats
-          vides ou très pauvres.
+          {currentModelInfo?.supportsTools === true && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-success">
+              <Icon name="check-circle" size={13} />
+              Ce modèle annonce la prise en charge des outils.
+            </p>
+          )}
+          {currentModelInfo?.supportsTools === false && (
+            <p className="mt-2 inline-flex items-start gap-1.5 text-xs text-danger">
+              <Icon name="alert-circle" size={13} className="mt-0.5" />
+              <span>
+                Ce modèle n'annonce <strong>pas</strong> la prise en charge des outils : la
+                recherche web via MCP ne fonctionnera pas avec lui.
+              </span>
+            </p>
+          )}
+          {selectedModel.trim() && !currentModelInfo && models.length > 0 && (
+            <p className="mt-2 text-xs text-content-muted">
+              Modèle absent de la liste du fournisseur : Buzzy l'utilisera tel quel, sans pouvoir
+              vérifier ses capacités.
+            </p>
+          )}
+        </Field>
+
+        <Field
+          label="Mode de réflexion (reasoning)"
+          hint="Envoyé uniquement si le modèle le supporte. Un effort élevé améliore la qualité, mais augmente le temps et le coût."
+        >
+          <Select
+            value={reasoningEffort}
+            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+          >
+            {EFFORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <div className="border-t border-line pt-4">
+          <Button variant="primary" icon="save" onClick={() => save.mutate()} loading={save.isPending}>
+            Enregistrer
+          </Button>
+        </div>
+      </Card>
+
+      {/* ─── Exigence : accès aux outils ─── */}
+      <Alert tone="info" title="Le modèle doit gérer les outils (function calling)">
+        <p>
+          Buzzy interroge le web via des serveurs <strong>MCP</strong>, ce qui passe par l'appel
+          d'outils. Un modèle qui ne le prend pas en charge ne pourra pas chercher : il inventerait
+          des événements au lieu de les trouver, ce que Buzzy refuse — vous obtiendriez des
+          résultats vides ou très pauvres.
         </p>
-        <p className="text-xs text-muted">
-          Cette exigence ne vaut que si vous avez activé au moins un serveur MCP dans l'onglet
-          « 🌐 Recherche Web (MCP) ». Sans MCP actif, aucun outil n'est envoyé au modèle et
-          n'importe lequel convient — mais la découverte se limite alors à ses connaissances
-          internes.
+        <p className="mt-2">
+          Cette exigence ne vaut que si au moins un serveur MCP est actif. Sans MCP, aucun outil
+          n'est envoyé et n'importe quel modèle convient — mais la découverte se limite alors à ses
+          connaissances internes.
         </p>
         {toolsKnown.length > 0 && (
-          <p className="text-xs text-secondary">
+          <p className="mt-2">
             Votre fournisseur renseigne cette capacité :{' '}
             <strong>
               {toolsCapable.length} modèle(s) sur {toolsKnown.length}
             </strong>{' '}
-            annoncent la prise en charge des tools.
+            acceptent les outils.
           </p>
         )}
         {models.length > 0 && toolsKnown.length === 0 && (
-          <p className="text-xs text-muted">
+          <p className="mt-2">
             Votre fournisseur ne renseigne pas cette capacité : vérifiez dans sa documentation que
-            le modèle choisi accepte bien les <em>tools</em>.
+            le modèle choisi accepte bien les outils.
           </p>
         )}
-      </div>
-
-      <Field
-        label="Mode de réflexion (reasoning)"
-        hint="Envoyé au modèle uniquement s'il le supporte (reasoning_effort). Un effort plus élevé améliore la qualité mais augmente le temps et le coût."
-      >
-        <select
-          className="glass-input"
-          value={reasoningEffort}
-          onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
-        >
-          {EFFORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? <Spinner /> : '💾'} Enregistrer
-        </button>
-      </div>
-    </GlassPanel>
+      </Alert>
+    </div>
   );
 }

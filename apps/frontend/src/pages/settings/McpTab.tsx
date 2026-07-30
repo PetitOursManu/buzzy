@@ -2,20 +2,32 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { settingsApi, ApiError } from '../../lib/api';
-import { Chip, Field, GlassPanel, Spinner } from '../../components/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  IconButton,
+  Input,
+  Skeleton,
+  Switch,
+} from '../../components/ui';
+import { Icon } from '../../components/icons';
 import { MCP_PRESETS, type McpPresetDef } from '../../lib/constants';
 import type { McpServerInfo } from '../../lib/types';
 import { useToast } from '../../hooks/useToast';
+import { useConfirm } from '../../hooks/useConfirm';
 
 export function McpTab() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const serversQuery = useQuery({ queryKey: ['mcp-servers'], queryFn: settingsApi.listMcpServers });
 
   const servers = serversQuery.data ?? [];
-  const anyEnabled = useMemo(() => servers.some((s) => s.enabled), [servers]);
+  const enabledCount = useMemo(() => servers.filter((s) => s.enabled).length, [servers]);
 
-  // Formulaire d'ajout
   const [formName, setFormName] = useState('');
   const [formUrl, setFormUrl] = useState('');
   const [formAuth, setFormAuth] = useState('');
@@ -28,6 +40,11 @@ export function McpTab() {
     setFormPreset(preset.preset);
   };
 
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
+    queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
+  };
+
   const create = useMutation({
     mutationFn: () =>
       settingsApi.createMcpServer({
@@ -38,8 +55,8 @@ export function McpTab() {
         preset: formPreset,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
-      toast('Serveur MCP ajouté.', 'success');
+      invalidate();
+      toast('Serveur MCP ajouté (désactivé).', 'success');
       setFormName('');
       setFormUrl('');
       setFormAuth('');
@@ -49,121 +66,165 @@ export function McpTab() {
   });
 
   const update = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<McpServerInfo> & { authHeader?: string | null } }) =>
-      settingsApi.updateMcpServer(id, data as any),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mcp-servers'] }),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      settingsApi.updateMcpServer(id, { enabled }),
+    onSuccess: () => invalidate(),
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Mise à jour impossible.', 'error'),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => settingsApi.deleteMcpServer(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
+      invalidate();
       toast('Serveur supprimé.', 'success');
     },
+    onError: (e) => toast(e instanceof ApiError ? e.message : 'Suppression impossible.', 'error'),
   });
 
+  const askRemove = async (server: McpServerInfo) => {
+    const ok = await confirm({
+      title: `Supprimer « ${server.name} » ?`,
+      message: "Le serveur ne sera plus proposé. Vous pourrez le rajouter à tout moment.",
+      confirmLabel: 'Supprimer',
+    });
+    if (ok) remove.mutate(server.id);
+  };
+
   return (
-    <div className="flex flex-col gap-5 max-w-3xl">
-      <GlassPanel className="flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-display font-semibold">Recherche Web (MCP)</h2>
-            <p className="text-secondary text-sm mt-1">
-              Branchez des serveurs MCP de recherche web pour fiabiliser les sources de vos événements.
-              Désactivée par défaut.
+    <div className="flex max-w-3xl flex-col gap-4">
+      <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-lg">Recherche web (MCP)</h2>
+            <p className="mt-1 text-sm text-content-2">
+              Branchez des serveurs MCP pour que l'IA cherche les événements sur le web au lieu de
+              les tirer de sa mémoire.
             </p>
           </div>
-          <Chip tone={anyEnabled ? 'green' : 'default'}>
-            {anyEnabled ? '● Recherche web active' : '○ Inactive'}
-          </Chip>
+          <Badge tone={enabledCount > 0 ? 'success' : 'neutral'} icon={enabledCount > 0 ? 'check-circle' : 'info'}>
+            {enabledCount > 0 ? `${enabledCount} serveur(s) actif(s)` : 'Inactive'}
+          </Badge>
         </div>
-        <p className="text-xs text-muted">
-          La recherche web est utilisée dès qu'au moins un serveur est activé. Elle nécessite un modèle
-          IA compatible avec le <em>tool calling</em> ; sinon Buzzy génère sans recherche web et l'indique.
-        </p>
-      </GlassPanel>
 
-      {/* Préréglages */}
-      <GlassPanel className="flex flex-col gap-3">
-        <h3 className="font-display font-semibold">Préréglages</h3>
-        <p className="text-xs text-muted">
-          Cliquez pour pré-remplir le formulaire, puis renseignez votre clé si nécessaire.
+        {enabledCount === 0 && (
+          <Alert tone="info">
+            Trois serveurs gratuits sont déjà déployés avec Buzzy et enregistrés ci-dessous. Il
+            suffit de les activer — aucune clé API. Ensemble, ils forment la chaîne{' '}
+            <strong>chercher → ouvrir → dater</strong> qui élimine l'essentiel des inventions.
+          </Alert>
+        )}
+
+        <p className="text-xs leading-relaxed text-content-muted">
+          Nécessite un modèle IA compatible avec l'appel d'outils. Sinon, Buzzy génère sans
+          recherche web et le signale clairement dans l'interface.
         </p>
-        <div className="grid sm:grid-cols-2 gap-2">
+      </Card>
+
+      {/* ─── Serveurs configurés ─── */}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-[13px] font-semibold text-content-2">Serveurs configurés</h3>
+        {serversQuery.isLoading ? (
+          <Skeleton className="h-20" />
+        ) : servers.length === 0 ? (
+          <p className="text-sm text-content-muted">Aucun serveur configuré pour l'instant.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <AnimatePresence initial={false}>
+              {servers.map((s) => (
+                <ServerRow
+                  key={s.id}
+                  server={s}
+                  onToggle={(enabled) => update.mutate({ id: s.id, enabled })}
+                  onDelete={() => askRemove(s)}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </section>
+
+      {/* ─── Préréglages ─── */}
+      <Card className="flex flex-col gap-3">
+        <div>
+          <h3 className="font-display text-base">Ajouter un serveur</h3>
+          <p className="mt-0.5 text-xs text-content-muted">
+            Cliquez un préréglage pour pré-remplir le formulaire, puis renseignez votre clé si
+            nécessaire.
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
           {MCP_PRESETS.map((p) => (
             <button
-              key={p.preset}
+              key={`${p.preset}-${p.url}`}
+              type="button"
               onClick={() => applyPreset(p)}
-              className="glass rounded-xl p-3 text-left hover:shadow-glow transition-shadow"
+              className="rounded-lg border border-line bg-surface p-3 text-left transition-colors hover:border-line-strong hover:bg-surface-2"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-sm">{p.label}</span>
-                <Chip tone={p.needsAuth ? 'amber' : 'green'}>{p.needsAuth ? 'Clé requise' : 'Gratuit'}</Chip>
-              </div>
-              <p className="text-xs text-muted mt-1">{p.note}</p>
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{p.label}</span>
+                <Badge tone={p.needsAuth ? 'warning' : 'success'}>
+                  {p.needsAuth ? 'Clé requise' : 'Gratuit'}
+                </Badge>
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-content-muted">{p.note}</span>
+              {p.bundled && (
+                <span className="mt-1.5 inline-flex items-center gap-1 text-2xs text-accent-text">
+                  <Icon name="check-circle" size={11} />
+                  Déployé avec Buzzy
+                </span>
+              )}
             </button>
           ))}
         </div>
-      </GlassPanel>
 
-      {/* Formulaire d'ajout */}
-      <GlassPanel className="flex flex-col gap-4">
-        <h3 className="font-display font-semibold">Ajouter un serveur MCP</h3>
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
           <Field label="Nom">
-            <input className="glass-input" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="ex : Tavily" />
+            <Input
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="ex : Tavily"
+            />
           </Field>
           <Field label="URL (HTTP/SSE)" hint="Distante ou interne au réseau Docker.">
-            <input className="glass-input" value={formUrl} onChange={(e) => setFormUrl(e.target.value)} placeholder="https://… ou http://searxng-mcp:3000/mcp" />
+            <Input
+              value={formUrl}
+              onChange={(e) => setFormUrl(e.target.value)}
+              placeholder="https://… ou http://searxng-mcp:8000/mcp"
+              spellCheck={false}
+            />
           </Field>
         </div>
+
         <Field
-          label="En-tête d'authentification (optionnel)"
-          hint="Format « Nom: valeur » (ex : Authorization: Bearer xxx) ou simplement la valeur du token. Chiffré en base."
+          label="En-tête d'authentification"
+          hint="Facultatif. Format « Nom: valeur » (ex : Authorization: Bearer xxx), ou simplement le jeton. Chiffré en base."
         >
-          <input
-            className="glass-input"
+          <Input
             value={formAuth}
             onChange={(e) => setFormAuth(e.target.value)}
             placeholder="Authorization: Bearer …"
             autoComplete="off"
           />
         </Field>
-        <div>
-          <button
-            className="btn-primary flex items-center gap-2"
-            onClick={() => create.mutate()}
-            disabled={create.isPending || !formName || !formUrl}
-          >
-            {create.isPending ? <Spinner /> : '➕'} Ajouter le serveur
-          </button>
-        </div>
-      </GlassPanel>
 
-      {/* Liste des serveurs */}
-      <div className="flex flex-col gap-3">
-        <h3 className="font-display font-semibold">Serveurs configurés</h3>
-        {serversQuery.isLoading ? (
-          <div className="shimmer rounded-xl h-20" />
-        ) : servers.length === 0 ? (
-          <p className="text-sm text-muted">Aucun serveur configuré pour l'instant.</p>
-        ) : (
-          <AnimatePresence>
-            {servers.map((s) => (
-              <ServerRow
-                key={s.id}
-                server={s}
-                onToggle={(enabled) => update.mutate({ id: s.id, data: { enabled } })}
-                onDelete={() => remove.mutate(s.id)}
-              />
-            ))}
-          </AnimatePresence>
-        )}
-      </div>
+        <div>
+          <Button
+            variant="primary"
+            icon="plus"
+            onClick={() => create.mutate()}
+            loading={create.isPending}
+            disabled={!formName || !formUrl}
+          >
+            Ajouter le serveur
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }
+
+/* ─── Ligne de serveur ─────────────────────────────────────────── */
 
 function ServerRow({
   server,
@@ -175,13 +236,17 @@ function ServerRow({
   onDelete: () => void;
 }) {
   const { toast } = useToast();
-  const [testResult, setTestResult] = useState<{ ok: boolean; tools: string[]; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    tools: string[];
+    error?: string;
+  } | null>(null);
 
   const test = useMutation({
     mutationFn: () => settingsApi.testMcpServer(server.id),
     onSuccess: (res) => {
       setTestResult(res);
-      if (res.ok) toast(`Connexion OK — ${res.tools.length} outil(s).`, 'success');
+      if (res.ok) toast(`Connexion réussie — ${res.tools.length} outil(s).`, 'success');
       else toast(res.error ?? 'Connexion échouée.', 'error');
     },
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Test impossible.', 'error'),
@@ -190,49 +255,62 @@ function ServerRow({
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="glass rounded-xl p-4 flex flex-col gap-2"
+      exit={{ opacity: 0, x: -12 }}
+      className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3.5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{server.name}</span>
-            {server.preset && server.preset !== 'custom' && <Chip tone="grape">{server.preset}</Chip>}
-            {server.authConfigured && <Chip>🔑 auth</Chip>}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm font-medium">{server.name}</span>
+            {server.preset && server.preset !== 'custom' && (
+              <Badge tone="accent">{server.preset}</Badge>
+            )}
+            {server.authConfigured && (
+              <Badge tone="neutral" icon="lock">
+                auth
+              </Badge>
+            )}
           </div>
-          <p className="text-xs text-muted truncate">{server.url}</p>
+          <p className="truncate font-mono text-xs text-content-muted">{server.url}</p>
         </div>
+
         <div className="flex items-center gap-2">
-          <button className="btn-ghost !py-1.5 !px-3 text-sm flex items-center gap-1.5" onClick={() => test.mutate()} disabled={test.isPending}>
-            {test.isPending ? <Spinner /> : '🔌'} Tester
-          </button>
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input
-              type="checkbox"
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="network"
+            onClick={() => test.mutate()}
+            loading={test.isPending}
+          >
+            Tester
+          </Button>
+          <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+            <Switch
               checked={server.enabled}
-              onChange={(e) => onToggle(e.target.checked)}
-              className="h-4 w-4 accent-[color:var(--honey)]"
+              onChange={onToggle}
+              label={`Activer ${server.name}`}
             />
-            Actif
+            <span className={server.enabled ? 'font-medium text-content' : 'text-content-muted'}>
+              {server.enabled ? 'Actif' : 'Inactif'}
+            </span>
           </label>
-          <button className="btn-ghost !py-1.5 !px-3 text-sm text-red-500" onClick={onDelete} aria-label="Supprimer">
-            🗑
-          </button>
+          <IconButton icon="trash" label="Supprimer" size="sm" variant="danger" onClick={onDelete} />
         </div>
       </div>
+
       {testResult && (
-        <div className="text-xs">
-          {testResult.ok ? (
-            <span className="text-emerald-500">
-              ✔ {testResult.tools.length} outil(s) : {testResult.tools.slice(0, 6).join(', ')}
-              {testResult.tools.length > 6 ? '…' : ''}
-            </span>
-          ) : (
-            <span className="text-red-500">✕ {testResult.error}</span>
-          )}
-        </div>
+        <p
+          className={`inline-flex items-start gap-1.5 text-xs ${testResult.ok ? 'text-success' : 'text-danger'}`}
+        >
+          <Icon name={testResult.ok ? 'check-circle' : 'alert-circle'} size={13} className="mt-0.5" />
+          <span className="min-w-0 break-words">
+            {testResult.ok
+              ? `${testResult.tools.length} outil(s) : ${testResult.tools.slice(0, 6).join(', ')}${testResult.tools.length > 6 ? '…' : ''}`
+              : testResult.error}
+          </span>
+        </p>
       )}
     </motion.div>
   );

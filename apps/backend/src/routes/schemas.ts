@@ -113,6 +113,18 @@ export const manualEventSchema = z.object({
   theme: z.string().max(120).optional().default('Autre'),
 });
 
+/** Édition d'un événement existant : tous les champs sont facultatifs. */
+export const eventUpdateSchema = z.object({
+  title: z.string().min(1, 'Titre requis.').max(300).optional(),
+  description: z.string().min(1, 'Description requise.').max(4000).optional(),
+  // "" ou null efface la date ; absent = inchangée.
+  eventDate: z.string().optional().nullable(),
+  eventPeriod: z.string().max(120).optional().nullable(),
+  scope: scopeEnum.optional(),
+  region: z.string().max(200).optional().nullable(),
+  theme: z.string().max(120).optional(),
+});
+
 export const deleteEventsSchema = z.object({
   exceptIds: z.array(z.string()).max(1000).optional().default([]),
 });
@@ -122,6 +134,8 @@ export const eventListQuerySchema = z.object({
   theme: z.string().max(120).optional(),
   region: z.string().max(200).optional(),
   verified: z.enum(['true', 'false']).optional(),
+  // Recherche plein texte sur le titre et la description.
+  q: z.string().max(200).optional(),
   take: z.coerce.number().int().min(1).max(200).optional().default(60),
   skip: z.coerce.number().int().min(0).optional().default(0),
 });
@@ -197,6 +211,12 @@ export const postUpdateSchema = z.object({
   status: z.enum(['DRAFT', 'APPROVED', 'PUBLISHED']).optional(),
   // Date attribuée à la main, notamment pour replacer une publication dont
   // l'événement était daté hors de la plage du calendrier.
+  scheduledDate: z.string().min(1).optional(),
+});
+
+/** Duplication d'une publication : réseau et date facultatifs (repris sinon). */
+export const postDuplicateSchema = z.object({
+  network: z.enum(['facebook', 'instagram', 'linkedin', 'x', 'tiktok']).optional(),
   scheduledDate: z.string().min(1).optional(),
 });
 

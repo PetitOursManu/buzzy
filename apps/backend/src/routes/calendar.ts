@@ -11,14 +11,31 @@ import {
 } from './schemas';
 import {
   CalendarInputError,
+  atPublishingHour,
   createEmptyCalendar,
   generateCalendar,
   preGeneratedDescription,
 } from '../services/calendar.service';
 import { toCsv } from '../lib/csv';
+import { buildIcs } from '../lib/ics';
 
 const router = Router();
 router.use(requireAuth);
+
+/** Libellés lisibles pour les exports destinés à un humain. */
+const NETWORK_LABELS: Record<string, string> = {
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  linkedin: 'LinkedIn',
+  x: 'X',
+  tiktok: 'TikTok',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'Brouillon',
+  APPROVED: 'Validée',
+  PUBLISHED: 'Publiée',
+};
 
 router.post('/generate', aiGenerationLimiter, validate(calendarGenerateSchema), async (req, res) => {
   const body = req.body as {
@@ -176,7 +193,7 @@ router.put('/:postPlanId', validate(calendarUpdateSchema), async (req, res) => {
   if (stranded.length > 0) {
     await prisma.post.updateMany({
       where: { id: { in: stranded.map((p) => p.id) } },
-      data: { scheduledDate: startDate, needsReschedule: true },
+      data: { scheduledDate: atPublishingHour(startDate), needsReschedule: true },
     });
   }
 
@@ -230,7 +247,7 @@ router.post('/:postPlanId/events', validate(calendarAddEventSchema), async (req,
   const rangeEnd = new Date(plan.endDate).setHours(23, 59, 59, 999);
   const needsReschedule =
     scheduledDate.getTime() < rangeStart || scheduledDate.getTime() > rangeEnd;
-  if (needsReschedule) scheduledDate = plan.startDate;
+  if (needsReschedule) scheduledDate = atPublishingHour(plan.startDate);
 
   const posts = await prisma.$transaction(
     networks.map((network) =>
@@ -280,9 +297,15 @@ router.delete('/:postPlanId/posts', async (req, res) => {
   return res.json({ deleted: result.count });
 });
 
+const EXPORT_FORMATS = ['json', 'csv', 'ics'] as const;
+type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
 router.get('/:postPlanId/export', async (req, res) => {
   const { postPlanId } = req.params;
-  const format = (req.query.format as string) === 'csv' ? 'csv' : 'json';
+  const requested = String(req.query.format ?? 'json').toLowerCase();
+  const format: ExportFormat = (EXPORT_FORMATS as readonly string[]).includes(requested)
+    ? (requested as ExportFormat)
+    : 'json';
   const plan = await prisma.postPlan.findUnique({
     where: { id: postPlanId },
     include: {
@@ -298,6 +321,35 @@ router.get('/:postPlanId/export', async (req, res) => {
       `attachment; filename="buzzy-calendrier-${postPlanId}.json"`,
     );
     return res.send(JSON.stringify(plan, null, 2));
+  }
+
+  if (format === 'ics') {
+    // Importable dans Google Agenda, Outlook, Apple Calendar…
+    const ics = buildIcs(
+      `Buzzy — ${plan.name}`,
+      plan.posts.map((p) => ({
+        uid: `${p.id}@buzzy`,
+        start: p.scheduledDate,
+        durationMinutes: 30,
+        summary: `${NETWORK_LABELS[p.network] ?? p.network} · ${p.title}`,
+        description: [
+          p.content,
+          p.hashtags.length > 0 ? p.hashtags.map((h) => `#${h}`).join(' ') : '',
+          p.relatedEvent ? `Événement : ${p.relatedEvent.title}` : '',
+          `Statut : ${STATUS_LABELS[p.status] ?? p.status}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        categories: [NETWORK_LABELS[p.network] ?? p.network],
+      })),
+      new Date(),
+    );
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="buzzy-calendrier-${postPlanId}.ics"`,
+    );
+    return res.send(ics);
   }
 
   // CSV

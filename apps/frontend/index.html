@@ -2,16 +2,40 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🐝%3C/text%3E%3C/svg%3E" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Buzzy — Découverte d'événements et calendriers éditoriaux assistés par IA" />
-    <title>Buzzy 🐝</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
-      rel="stylesheet"
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f59e0b'/%3E%3Cg fill='none' stroke='%232a1a05' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='16' cy='18' rx='6' ry='8'/%3E%3Cpath d='M10.2 15.5h11.6M10 20.5h12M16 10V7'/%3E%3Cpath d='M13.4 5.5 16 7l2.6-1.5'/%3E%3C/g%3E%3C/svg%3E"
     />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Buzzy — Découverte d'événements et calendriers éditoriaux assistés par IA"
+    />
+    <title>Buzzy</title>
+    <!--
+      Aucune police distante : Buzzy s'auto-héberge et doit fonctionner sans
+      accès Internet, sans fuite vers un CDN tiers et sans le flash de texte
+      non stylé que provoque un chargement de police. La typographie repose
+      sur la pile système, définie dans theme/index.css.
+
+      Le thème est appliqué avant le premier rendu : sans cela, un utilisateur
+      en mode sombre verrait un éclair blanc à chaque chargement.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('buzzy-theme');
+          var dark =
+            stored === 'dark' ||
+            ((!stored || stored === 'system') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* mode privé : on garde le thème clair */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

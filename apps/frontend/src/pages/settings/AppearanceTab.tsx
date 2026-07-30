@@ -1,43 +1,69 @@
-import { GlassPanel } from '../../components/ui';
-import { useTheme, ThemeMode } from '../../hooks/useTheme';
+import clsx from 'clsx';
+import { Card } from '../../components/ui';
+import { Icon, type IconName } from '../../components/icons';
+import { useTheme, type ThemeMode } from '../../hooks/useTheme';
 
-const OPTIONS: { value: ThemeMode; label: string; emoji: string; desc: string }[] = [
-  { value: 'light', label: 'Clair', emoji: '☀️', desc: 'Verre lumineux sur fond pastel.' },
-  { value: 'dark', label: 'Sombre', emoji: '🌙', desc: 'Verre profond sur fond nuit miel.' },
-  { value: 'system', label: 'Système', emoji: '🖥️', desc: 'Suit les préférences de votre appareil.' },
+const OPTIONS: { value: ThemeMode; label: string; icon: IconName; desc: string }[] = [
+  { value: 'light', label: 'Clair', icon: 'sun', desc: 'Fond papier chaud, contraste élevé.' },
+  { value: 'dark', label: 'Sombre', icon: 'moon', desc: 'Brun profond, accents miel.' },
+  {
+    value: 'system',
+    label: 'Système',
+    icon: 'monitor',
+    desc: 'Suit le réglage de votre appareil.',
+  },
 ];
 
 export function AppearanceTab() {
   const { mode, resolved, setMode } = useTheme();
 
   return (
-    <GlassPanel className="flex flex-col gap-5 max-w-2xl">
+    <Card className="flex max-w-2xl flex-col gap-5">
       <div>
-        <h2 className="text-xl font-display font-semibold">Apparence</h2>
-        <p className="text-secondary text-sm mt-1">
-          Choisissez votre thème. L'aperçu s'applique instantanément (thème actif : {resolved === 'dark' ? 'sombre' : 'clair'}).
+        <h2 className="font-display text-lg">Apparence</h2>
+        <p className="mt-1 text-sm text-content-2">
+          Le changement s'applique instantanément. Thème actif :{' '}
+          <strong>{resolved === 'dark' ? 'sombre' : 'clair'}</strong>.
         </p>
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-3">
-        {OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setMode(opt.value)}
-            className={
-              mode === opt.value
-                ? 'glass-strong rounded-2xl p-4 text-left ring-2 ring-[color:var(--honey)] shadow-glow'
-                : 'glass rounded-2xl p-4 text-left hover:shadow-glow transition-shadow'
-            }
-          >
-            <div className="text-3xl mb-2" aria-hidden>
-              {opt.emoji}
-            </div>
-            <div className="font-display font-semibold">{opt.label}</div>
-            <div className="text-xs text-muted mt-1">{opt.desc}</div>
-          </button>
-        ))}
+      <div className="grid gap-3 sm:grid-cols-3">
+        {OPTIONS.map((opt) => {
+          const active = mode === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setMode(opt.value)}
+              aria-pressed={active}
+              className={clsx(
+                'rounded-lg border p-4 text-left transition-all duration-150',
+                active
+                  ? 'border-brand bg-brand-soft shadow-sm'
+                  : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2',
+              )}
+            >
+              <span
+                className={clsx(
+                  'mb-2.5 flex h-9 w-9 items-center justify-center rounded-md',
+                  active ? 'bg-brand text-brand-fg' : 'bg-surface-2 text-content-2',
+                )}
+              >
+                <Icon name={opt.icon} size={18} />
+              </span>
+              <span className="block font-display text-sm">{opt.label}</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-content-muted">
+                {opt.desc}
+              </span>
+            </button>
+          );
+        })}
       </div>
-    </GlassPanel>
+
+      <p className="border-t border-line pt-4 text-xs leading-relaxed text-content-muted">
+        Buzzy utilise la typographie de votre système : aucune police n'est téléchargée depuis un
+        service tiers, l'interface s'affiche immédiatement et fonctionne hors ligne.
+      </p>
+    </Card>
   );
 }

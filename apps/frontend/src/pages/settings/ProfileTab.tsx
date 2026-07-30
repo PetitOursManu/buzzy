@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, ApiError } from '../../lib/api';
-import { Field, GlassPanel, Spinner } from '../../components/ui';
+import { Alert, Button, Card, Field, Input, Select, Textarea } from '../../components/ui';
 import { TONES, NETWORKS } from '../../lib/constants';
 import type { Network, Tone } from '../../lib/types';
 import { NetworkSelector } from '../../components/NetworkIcon';
@@ -46,85 +46,114 @@ export function ProfileTab() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
       toast('Profil enregistré.', 'success');
     },
-    onError: (e) => toast(e instanceof ApiError ? e.message : 'Enregistrement impossible.', 'error'),
+    onError: (e) =>
+      toast(e instanceof ApiError ? e.message : 'Enregistrement impossible.', 'error'),
   });
 
   return (
-    <GlassPanel className="flex flex-col gap-5 max-w-2xl">
-      <div>
-        <h2 className="text-xl font-display font-semibold">Profil & attentes</h2>
-        <p className="text-secondary text-sm mt-1">
-          Ces informations orientent le ton et le contenu de toutes vos générations.
-        </p>
-      </div>
+    <div className="flex max-w-3xl flex-col gap-4">
+      <Card className="flex flex-col gap-5">
+        <div>
+          <h2 className="font-display text-lg">Profil & attentes</h2>
+          <p className="mt-1 text-sm text-content-2">
+            Ces informations orientent le ton et le contenu de toutes vos générations.
+          </p>
+        </div>
 
-      <Field label="Description de votre activité">
-        <textarea
-          className="glass-input min-h-[110px] resize-y"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Décrivez votre activité, votre marque, vos valeurs…"
-        />
-      </Field>
+        <Field
+          label="Description de votre activité"
+          hint="Plus c'est précis, plus les publications vous ressemblent."
+        >
+          <Textarea
+            className="min-h-[7rem]"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Décrivez votre activité, votre marque, vos valeurs…"
+          />
+        </Field>
 
-      <Field label="Ton souhaité">
-        <select className="glass-input" value={tone} onChange={(e) => setTone(e.target.value as Tone)}>
-          {TONES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Ton souhaité">
+            <Select value={tone} onChange={(e) => setTone(e.target.value as Tone)}>
+              {TONES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-      <Field label="Audience cible">
-        <input
-          className="glass-input"
-          value={targetAudience}
-          onChange={(e) => setTargetAudience(e.target.value)}
-          placeholder="ex : jeunes actifs, associations locales, dirigeants PME…"
-        />
-      </Field>
+          <Field label="Audience cible">
+            <Input
+              value={targetAudience}
+              onChange={(e) => setTargetAudience(e.target.value)}
+              placeholder="ex : jeunes actifs, associations locales…"
+            />
+          </Field>
+        </div>
 
-      <Field label="Sujets ou formulations à éviter">
-        <textarea
-          className="glass-input min-h-[80px] resize-y"
-          value={restrictions}
-          onChange={(e) => setRestrictions(e.target.value)}
-          placeholder="ex : ne pas parler de politique, éviter le tutoiement…"
-        />
-      </Field>
+        <Field label="Sujets ou formulations à éviter">
+          <Textarea
+            className="min-h-[5rem]"
+            value={restrictions}
+            onChange={(e) => setRestrictions(e.target.value)}
+            placeholder="ex : ne pas parler de politique, éviter le tutoiement…"
+          />
+        </Field>
 
-      <Field
-        label="Sources à privilégier"
-        hint="Sites, domaines ou organismes que l'IA doit privilégier pour trouver et sourcer les événements, EN PLUS de ses sources habituelles. Un par ligne ou séparés par des virgules."
-      >
-        <textarea
-          className="glass-input min-h-[90px] resize-y"
-          value={prioritySources}
-          onChange={(e) => setPrioritySources(e.target.value)}
-          placeholder={'ex :\nunesco.org\njournee-mondiale.com\nAgenda de ma région / ville\nSites d\'associations locales'}
-        />
-      </Field>
+        <Field
+          label="Sources à privilégier"
+          hint="Sites, domaines ou organismes que l'IA doit privilégier pour trouver et sourcer les événements, en plus de ses sources habituelles. Un par ligne ou séparés par des virgules."
+        >
+          <Textarea
+            className="min-h-[6rem]"
+            value={prioritySources}
+            onChange={(e) => setPrioritySources(e.target.value)}
+            placeholder={
+              "ex :\nunesco.org\njournee-mondiale.com\nAgenda de ma région / ville\nSites d'associations locales"
+            }
+          />
+        </Field>
 
-      <Field
-        label="Réseaux sociaux préférés"
-        hint="Pour chaque réseau coché, une description prête à publier (adaptée à sa longueur) sera générée pour CHAQUE événement découvert."
-      >
+        <div className="border-t border-line pt-4">
+          <Button variant="primary" icon="save" onClick={() => save.mutate()} loading={save.isPending}>
+            Enregistrer
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div>
+          <h3 className="font-display text-base">Réseaux sociaux</h3>
+          <p className="mt-1 text-sm text-content-2">
+            Pour chaque réseau retenu, une description prête à publier — respectant sa longueur et
+            son ton — est rédigée pour <strong>chaque</strong> événement découvert. Ce sont aussi
+            les seuls réseaux proposés dans les calendriers.
+          </p>
+        </div>
+
         <NetworkSelector
           networks={NETWORKS.map((n) => n.value)}
           selected={preferredNetworks}
           onToggle={toggleNetwork}
         />
-      </Field>
 
-      <div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? <Spinner /> : '💾'} Enregistrer
-        </button>
-      </div>
-    </GlassPanel>
+        {preferredNetworks.length === 0 && (
+          <Alert tone="warning">
+            Sans réseau retenu, aucun calendrier ne peut être généré et aucune description par
+            réseau ne sera rédigée.
+          </Alert>
+        )}
+
+        <div className="border-t border-line pt-4">
+          <Button variant="primary" icon="save" onClick={() => save.mutate()} loading={save.isPending}>
+            Enregistrer
+          </Button>
+        </div>
+      </Card>
+    </div>
   );
 }

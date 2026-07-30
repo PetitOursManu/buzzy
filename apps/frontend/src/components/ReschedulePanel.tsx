@@ -2,12 +2,17 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { PostItem, PostPlan } from '../lib/types';
-import { NETWORK_EMOJI, NETWORK_LABEL } from '../lib/constants';
+import { NETWORK_LABEL } from '../lib/constants';
 import { postsApi, ApiError } from '../lib/api';
-import { Spinner } from './ui';
+import { Button, Input } from './ui';
+import { Icon } from './icons';
+import { NetworkIcon } from './NetworkIcon';
 import { useToast } from '../hooks/useToast';
 
-const iso = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+const iso = (d: Date | string) => {
+  const date = new Date(d);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 const dateLabel = (d: string) =>
   new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -24,23 +29,23 @@ export function ReschedulePanel({ plan, posts }: { plan: PostPlan; posts: PostIt
 
   return (
     <motion.section
-      initial={{ opacity: 0, y: -8 }}
+      initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-strong rounded-2xl p-4 flex flex-col gap-3 border border-amber-500/40"
+      className="flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4"
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="font-display font-semibold flex items-center gap-2">
-          <span aria-hidden>⚠️</span>
-          {posts.length} publication(s) hors de la plage du calendrier
-        </h3>
-        <span className="text-xs text-muted">
-          calendrier du {dateLabel(plan.startDate)} au {dateLabel(plan.endDate)}
-        </span>
+      <div className="flex items-start gap-2.5">
+        <Icon name="alert-triangle" size={18} className="mt-0.5 text-warning" />
+        <div className="min-w-0 flex-1">
+          <h3 className="font-display text-sm text-warning">
+            {posts.length} publication{posts.length > 1 ? 's' : ''} hors de la plage du calendrier
+          </h3>
+          <p className="mt-0.5 text-[13px] leading-relaxed text-content-2">
+            Ces événements sont datés en dehors du {dateLabel(plan.startDate)} –{' '}
+            {dateLabel(plan.endDate)}. Attribuez à chacun une date comprise dans le calendrier ; en
+            attendant, ils restent placés à titre provisoire.
+          </p>
+        </div>
       </div>
-      <p className="text-sm text-secondary">
-        Ces événements sont datés en dehors de la plage choisie. Attribuez à chacun une date
-        comprise dans le calendrier ; en attendant, ils restent placés à titre provisoire.
-      </p>
 
       <div className="flex flex-col gap-2">
         <AnimatePresence mode="popLayout">
@@ -71,32 +76,32 @@ function RescheduleRow({ post, plan }: { post: PostItem; plan: PostPlan }) {
     onError: (e) => toast(e instanceof ApiError ? e.message : 'Date non attribuée.', 'error'),
   });
 
-  // Date d'origine de l'événement, celle qui tombe hors plage.
   const originalDate = post.relatedEvent?.eventDate;
 
   return (
     <motion.div
       layout
       exit={{ opacity: 0, height: 0 }}
-      className="glass rounded-xl p-3 flex flex-wrap items-center gap-3"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3"
     >
-      <div className="flex-1 min-w-[220px] flex flex-col gap-0.5">
-        <span className="text-xs text-muted flex items-center gap-1.5">
-          {NETWORK_EMOJI[post.network]} {NETWORK_LABEL[post.network]}
+      <div className="flex min-w-[14rem] flex-1 flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1.5 text-xs text-content-muted">
+          <NetworkIcon network={post.network} size={12} />
+          {NETWORK_LABEL[post.network]}
         </span>
-        <span className="font-medium text-sm">{post.title}</span>
+        <span className="text-sm font-medium leading-snug">{post.title}</span>
         {originalDate && (
-          <span className="text-xs text-amber-500">
-            Date de l'événement : {dateLabel(originalDate)} — hors calendrier
+          <span className="text-xs text-warning">
+            Événement daté du {dateLabel(originalDate)} — hors calendrier
           </span>
         )}
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2">
         <span className="sr-only">Nouvelle date pour « {post.title} »</span>
-        <input
+        <Input
           type="date"
-          className="glass-input !w-auto !py-1.5"
+          className="!w-auto"
           value={date}
           min={iso(plan.startDate)}
           max={iso(plan.endDate)}
@@ -104,13 +109,16 @@ function RescheduleRow({ post, plan }: { post: PostItem; plan: PostPlan }) {
         />
       </label>
 
-      <button
-        className="btn-primary !py-1.5 !px-3 text-sm flex items-center gap-2"
+      <Button
+        variant="primary"
+        size="sm"
+        icon="pin"
         onClick={() => save.mutate()}
-        disabled={save.isPending || !date}
+        loading={save.isPending}
+        disabled={!date}
       >
-        {save.isPending ? <Spinner /> : '📌'} Attribuer
-      </button>
+        Attribuer
+      </Button>
     </motion.div>
   );
 }

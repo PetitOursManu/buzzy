@@ -6,10 +6,10 @@
 # http://localhost:3000 en développement. En production, c'est le
 # reverse-proxy (Coolify/Traefik) qui expose l'application.
 #
-# La recherche web SearXNG est définie dans docker-compose.yml (profil
-# « searxng »). Pour l'activer en local, mettez dans votre fichier .env :
-#     COMPOSE_PROFILES=searxng
-#     SEARXNG_MCP_URL=http://searxng-mcp:8000/mcp
+# Les serveurs de recherche web MCP (SearXNG, Fetch, Time) sont définis
+# dans docker-compose.yml et démarrent avec la stack : aucun profil ni
+# variable à positionner. Ils restent inactifs côté application tant
+# qu'ils ne sont pas cochés dans Paramètres → Recherche Web (MCP).
 # ─────────────────────────────────────────────────────────────────
 
 services:
