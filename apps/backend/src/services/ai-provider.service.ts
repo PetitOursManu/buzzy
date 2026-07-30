@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { decrypt } from '../lib/crypto';
+import { isDeadlineAbort } from '../lib/deadline';
 
 /**
  * Client minimal pour une API compatible OpenAI (OpenRouter, Ollama Cloud,
@@ -309,6 +310,15 @@ export async function chatCompletion(
         signal: controller.signal,
       });
     } catch (e) {
+      // L'échéance globale prime : elle explique mieux l'échec que le délai
+      // du seul appel en cours, qui n'en est que la conséquence.
+      if (isDeadlineAbort(options.signal)) {
+        throw new AiRequestError(
+          "La génération a dépassé le temps qui lui est alloué. Réduisez le nombre de " +
+            'serveurs de recherche actifs, choisissez un modèle plus rapide, ou augmentez ' +
+            'BUZZY_GENERATION_TIMEOUT_MS (et le délai de votre reverse-proxy en conséquence).',
+        );
+      }
       if (controller.signal.reason === TIMEOUT_REASON) {
         throw new AiRequestError(
           `Le modèle n'a pas répondu en moins de ${Math.round(REQUEST_TIMEOUT_MS / 1000)} s. ` +

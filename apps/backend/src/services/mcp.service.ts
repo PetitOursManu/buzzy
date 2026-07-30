@@ -171,15 +171,33 @@ export function mcpToolsToOpenAI(connections: ConnectedMcpServer[]): {
   return { tools, lookup };
 }
 
+/**
+ * Délai maximal d'un appel d'outil MCP.
+ *
+ * Le serveur « fetch » télécharge une page arbitraire : un site lent ou une
+ * ressource énorme bloquerait la génération entière. Le défaut du SDK est
+ * généreux ; on le resserre pour qu'un outil lent coûte une recherche, pas
+ * toute la requête.
+ */
+const MCP_TOOL_TIMEOUT_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.MCP_TOOL_TIMEOUT_MS ?? '', 10) || 25_000,
+);
+
 /** Exécute un appel d'outil MCP et renvoie le résultat sérialisé en texte. */
 export async function callMcpTool(
   entry: McpToolInfo & { client: Client },
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const result = await entry.client.callTool({
-    name: entry.originalName,
-    arguments: args,
-  });
+  const result = await entry.client.callTool(
+    {
+      name: entry.originalName,
+      arguments: args,
+    },
+    undefined,
+    { timeout: MCP_TOOL_TIMEOUT_MS, signal },
+  );
   // Le contenu MCP est un tableau de blocs (text/image/...). On extrait le texte.
   const content = (result.content as Array<{ type: string; text?: string }>) ?? [];
   const text = content

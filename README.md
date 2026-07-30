@@ -187,7 +187,9 @@ buzzy/
 | `PORT` | Port d'écoute du serveur | `3000` |
 | `NODE_ENV` | Environnement | `production` |
 | `CORS_ORIGIN` | (Optionnel) origine(s) autorisée(s) en dev | `http://localhost:5173` |
-| `AI_REQUEST_TIMEOUT_MS` | Délai maximal d'un appel au modèle (défaut 120 000) | `180000` |
+| `BUZZY_GENERATION_TIMEOUT_MS` | Budget total d'une génération (défaut 100 000) | `150000` |
+| `AI_REQUEST_TIMEOUT_MS` | Délai d'un appel individuel au modèle (défaut 120 000) | `180000` |
+| `MCP_TOOL_TIMEOUT_MS` | Délai d'un appel d'outil MCP (défaut 25 000) | `40000` |
 | `SEARXNG_MCP_URL` | Serveur MCP de recherche pré-enregistré (vide = aucun) | `http://searxng-mcp:8000/mcp` |
 | `MCP_FETCH_URL` | Serveur MCP de lecture de pages pré-enregistré | `http://mcp-fetch:8000/mcp` |
 | `MCP_TIME_URL` | Serveur MCP de date pré-enregistré | `http://mcp-time:8000/mcp` |
@@ -314,7 +316,35 @@ docker compose logs -f app | grep "génération d'événements"
 | `n'a pas répondu en moins de N s` | Modèle trop lent pour le délai | Modèle plus rapide, réflexion réduite, ou `AI_REQUEST_TIMEOUT_MS` plus élevé |
 | `n'a pas renvoyé de réponse exploitable` | Le modèle n'a pas produit de JSON valide | Modèle plus capable, ou désactiver le mode de réflexion |
 
-Si l'interface affiche seulement **« Erreur 502 »** sans phrase explicative, le 502 ne vient pas de Buzzy mais de votre **reverse-proxy**, qui a coupé la requête avant la fin de la génération. Augmentez son délai de lecture (Coolify / Traefik / nginx) et gardez `AI_REQUEST_TIMEOUT_MS` en dessous, pour que Buzzy réponde toujours le premier.
+### 502 de Buzzy, ou 502 du reverse-proxy ?
+
+C'est la distinction décisive, et la console du navigateur ne permet pas de la faire — les deux affichent `502 (Bad Gateway)`. Regardez la **notification dans l'interface** :
+
+| Ce que vous voyez | Origine | Suite |
+|---|---|---|
+| Une phrase française détaillée | Buzzy | La cause est dans les logs, voir la table ci-dessus |
+| Juste « Erreur 502 » | Votre reverse-proxy | Il a coupé avant que Buzzy réponde |
+
+Un 502 du proxy ne laisse **aucune** trace dans `docker compose logs app` : la requête y est toujours en cours. C'est le signe le plus fiable.
+
+**Régler le proxy.** Une génération avec recherche web enchaîne jusqu'à onze appels au modèle et plusieurs chargements de pages. Buzzy la borne à `BUZZY_GENERATION_TIMEOUT_MS` (100 s par défaut) ; votre proxy doit accorder davantage :
+
+```
+délai de lecture du reverse-proxy  >  BUZZY_GENERATION_TIMEOUT_MS
+```
+
+- **Coolify / Traefik** — ajoutez un label au service `app` :
+  `traefik.http.serversTransport.buzzy.responseHeaderTimeout=180s`
+- **nginx** — `proxy_read_timeout 180s;`
+- **Caddy** — `reverse_proxy … { transport http { read_timeout 180s } }`
+
+Puis vérifiez la durée réelle de vos générations, journalisée à chaque succès :
+
+```
+[events] modèle=… web=oui durée=47s/100s proposés=9 retenus=7 …
+```
+
+Si `durée` frôle le budget, augmentez `BUZZY_GENERATION_TIMEOUT_MS` **et** le délai du proxy, ou réduisez le nombre de serveurs MCP actifs.
 
 L'onglet **Paramètres → Diagnostic** vérifie en un écran le fournisseur, le modèle, la clé et la joignabilité de chaque serveur MCP actif.
 

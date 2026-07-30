@@ -13,6 +13,7 @@ import {
   type ConnectedMcpServer,
 } from './mcp.service';
 import { verifySources, type RawSource } from './source-check.service';
+import { createDeadline, type Deadline } from '../lib/deadline';
 import {
   eventGenerationSystemPrompt,
   eventGenerationUserPrompt,
@@ -28,6 +29,25 @@ import type { EventScope, Event as PrismaEvent, Prisma } from '@prisma/client';
 // Plusieurs serveurs MCP (recherche + lecture de page + date) impliquent
 // davantage d'allers-retours avant la réponse finale.
 const MAX_TOOL_ITERATIONS = 10;
+
+/**
+ * Budget total d'une génération, tous appels confondus.
+ *
+ * Doit rester INFÉRIEUR au délai de lecture de votre reverse-proxy : sinon
+ * c'est lui qui coupe la requête, et l'utilisateur reçoit un 502 nu, sans le
+ * message expliquant ce qui s'est passé.
+ */
+const GENERATION_TIMEOUT_MS = Math.max(
+  20_000,
+  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 100_000,
+);
+
+/**
+ * Temps mis de côté pour la réponse finale. Quand il ne reste plus que cela,
+ * on cesse de chercher et on demande au modèle de conclure : mieux vaut une
+ * liste établie à partir des recherches déjà faites qu'une erreur sèche.
+ */
+const FINAL_ANSWER_RESERVE_MS = 25_000;
 
 export interface GeneratedEventInput {
   scopes: EventScope[];
@@ -144,24 +164,39 @@ async function runChatWithTools(
   messages: ChatMessage[],
   tools: ToolDefinition[],
   lookup: ReturnType<typeof mcpToolsToOpenAI>['lookup'],
+  deadline: Deadline,
 ): Promise<{ finalText: string; toolsUsed: boolean; toolCallingUnsupported: boolean }> {
   let toolsUsed = false;
+  const signal = deadline.signal;
 
   // Sans outils : appel simple.
   if (tools.length === 0) {
-    const res = await chatCompletion(config, { messages, temperature: 0.8 });
+    const res = await chatCompletion(config, { messages, temperature: 0.8, signal });
     return { finalText: res.message.content ?? '', toolsUsed: false, toolCallingUnsupported: false };
   }
 
   const working = [...messages];
+  let iterations = 0;
+
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    // Il faut garder de quoi rédiger la réponse : une itération de plus
+    // consommerait le budget sans rien produire d'exploitable.
+    if (deadline.remainingMs() < FINAL_ANSWER_RESERVE_MS) {
+      console.warn(
+        `[events] budget de temps presque épuisé après ${iterations} recherche(s) ` +
+          `(${Math.round(deadline.elapsedMs() / 1000)} s) — passage à la rédaction.`,
+      );
+      break;
+    }
+    iterations++;
+
     let res;
     try {
-      res = await chatCompletion(config, { messages: working, tools, temperature: 0.8 });
+      res = await chatCompletion(config, { messages: working, tools, temperature: 0.8, signal });
     } catch (e) {
       // Modèle ne supportant pas le tool calling → repli sans outils.
       if (e instanceof AiRequestError && (e.status === 400 || e.status === 404 || e.status === 422)) {
-        const fallback = await chatCompletion(config, { messages, temperature: 0.8 });
+        const fallback = await chatCompletion(config, { messages, temperature: 0.8, signal });
         return {
           finalText: fallback.message.content ?? '',
           toolsUsed,
@@ -197,8 +232,10 @@ async function runChatWithTools(
           args = {};
         }
         try {
-          toolResult = await callMcpTool(entry, args);
+          toolResult = await callMcpTool(entry, args, signal);
         } catch (e) {
+          // Un outil qui échoue n'interrompt pas la génération : le modèle
+          // reçoit l'erreur et peut chercher autrement.
           toolResult = `Erreur lors de la recherche : ${(e as Error).message}`;
         }
       }
@@ -211,8 +248,9 @@ async function runChatWithTools(
     }
   }
 
-  // Trop d'itérations : on force une réponse finale sans outils.
-  const finalRes = await chatCompletion(config, { messages: working, temperature: 0.7 });
+  // Budget épuisé ou trop d'itérations : on force une réponse finale sans
+  // outils, à partir de ce qui a déjà été trouvé.
+  const finalRes = await chatCompletion(config, { messages: working, temperature: 0.7, signal });
   return { finalText: finalRes.message.content ?? '', toolsUsed, toolCallingUnsupported: false };
 }
 
@@ -265,12 +303,14 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   let finalText = '';
   let toolsUsed = false;
   let toolCallingUnsupported = false;
+  const deadline = createDeadline(GENERATION_TIMEOUT_MS);
   try {
-    const result = await runChatWithTools(config, messages, tools, lookup);
+    const result = await runChatWithTools(config, messages, tools, lookup, deadline);
     finalText = result.finalText;
     toolsUsed = result.toolsUsed;
     toolCallingUnsupported = result.toolCallingUnsupported;
   } finally {
+    deadline.dispose();
     await Promise.all(connections.map((c) => c.close()));
   }
 
@@ -331,9 +371,11 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     created.push(event);
   }
 
-  // Traçabilité : indispensable pour comprendre une génération vide.
+  // Traçabilité : indispensable pour comprendre une génération vide, et pour
+  // savoir si la durée approche du délai du reverse-proxy.
   console.log(
     `[events] modèle=${config.model} web=${toolsUsed ? 'oui' : 'non'} ` +
+      `durée=${Math.round(deadline.elapsedMs() / 1000)}s/${Math.round(GENERATION_TIMEOUT_MS / 1000)}s ` +
       `proposés=${rawEvents.length} retenus=${created.length} ` +
       `écartés(incertains)=${discardedUncertain} écartés(sans source)=${discardedUnsourced}`,
   );
@@ -396,7 +438,13 @@ export async function rephraseEvent(id: string): Promise<PrismaEvent> {
     { role: 'system', content: eventRephraseSystemPrompt() },
     { role: 'user', content: eventRephraseUserPrompt(event.title, event.description) },
   ];
-  const res = await chatCompletion(config, { messages, temperature: 0.9 });
+  const deadline = createDeadline(GENERATION_TIMEOUT_MS);
+  let res;
+  try {
+    res = await chatCompletion(config, { messages, temperature: 0.9, signal: deadline.signal });
+  } finally {
+    deadline.dispose();
+  }
   const parsed = extractJson(res.message.content ?? '') as
     | { title?: string; description?: string }
     | null;
@@ -440,7 +488,13 @@ export async function planEvents(input: PlanInput): Promise<{ plan: string }> {
     { role: 'system', content: eventPlanSystemPrompt() },
     { role: 'user', content: eventPlanUserPrompt(params) },
   ];
-  const res = await chatCompletion(config, { messages, temperature: 0.5 });
+  const deadline = createDeadline(GENERATION_TIMEOUT_MS);
+  let res;
+  try {
+    res = await chatCompletion(config, { messages, temperature: 0.5, signal: deadline.signal });
+  } finally {
+    deadline.dispose();
+  }
   const plan = (res.message.content ?? '').trim();
   if (!plan) {
     throw new AiRequestError("Le modèle n'a pas produit de plan. Réessayez.");
