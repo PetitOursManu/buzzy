@@ -2,7 +2,6 @@ import { prisma } from '../lib/prisma';
 import {
   chatCompletion,
   getActiveAiConfig,
-  AiRequestError,
   type ChatMessage,
 } from './ai-provider.service';
 import {
@@ -10,6 +9,18 @@ import {
   postGenerationUserPrompt,
   type PostGenContext,
 } from '../prompts';
+import { createDeadline } from '../lib/deadline';
+import { NotFoundError } from '../lib/ai-errors';
+import { extractJsonObject } from '../lib/json-extract';
+
+/**
+ * Budget de temps d'une régénération de publication. Un seul appel au modèle :
+ * bien plus court qu'une découverte d'événements.
+ */
+const GENERATION_TIMEOUT_MS = Math.max(
+  10_000,
+  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 150_000,
+);
 import type { Event as PrismaEvent, Post, PostPlan, UserProfile } from '@prisma/client';
 
 /** Description déjà générée pour un réseau au niveau de l'événement, si disponible. */
@@ -209,24 +220,6 @@ interface RawPost {
   hashtags?: unknown;
 }
 
-function extractJson(text: string): RawPost | null {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed) as RawPost;
-  } catch {
-    /* try substring */
-  }
-  const first = trimmed.indexOf('{');
-  const last = trimmed.lastIndexOf('}');
-  if (first !== -1 && last > first) {
-    try {
-      return JSON.parse(trimmed.slice(first, last + 1)) as RawPost;
-    } catch {
-      /* ignore */
-    }
-  }
-  return null;
-}
 
 async function generateOnePost(
   config: Awaited<ReturnType<typeof getActiveAiConfig>>,
@@ -237,9 +230,28 @@ async function generateOnePost(
     { role: 'system', content: postGenerationSystemPrompt(profile) },
     { role: 'user', content: postGenerationUserPrompt(ctx) },
   ];
-  const res = await chatCompletion(config, { messages, temperature: 0.85 });
-  const parsed = extractJson(res.message.content ?? '');
+  const deadline = createDeadline(GENERATION_TIMEOUT_MS);
+  let res;
+  try {
+    res = await chatCompletion(config, {
+      messages,
+      temperature: 0.85,
+      responseFormatJson: true,
+      signal: deadline.signal,
+    });
+  } finally {
+    deadline.dispose();
+  }
+
+  // Même extracteur que la découverte : un préambule, un bloc markdown ou une
+  // réponse coupée ne doivent pas transformer la publication en charabia.
+  const parsed = extractJsonObject(res.message.content ?? '', { requiredKey: 'content' })
+    ?.value as RawPost | undefined;
   if (!parsed) {
+    console.warn(
+      `[posts] réponse non exploitable — modèle=${config.model} ` +
+        `fin=${res.finishReason ?? 'inconnu'} : ${(res.message.content ?? '').slice(0, 300)}`,
+    );
     return {
       title: ctx.event?.title ?? 'Publication',
       content: (res.message.content ?? '').trim() || 'Contenu à compléter.',
@@ -410,7 +422,7 @@ export async function regeneratePost(postId: string): Promise<Post> {
     include: { relatedEvent: true },
   });
   if (!post) {
-    throw new AiRequestError('Publication introuvable.');
+    throw new NotFoundError('Publication introuvable.');
   }
 
   const ctx: PostGenContext = {

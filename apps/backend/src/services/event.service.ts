@@ -14,6 +14,8 @@ import {
 } from './mcp.service';
 import { verifySources, type RawSource } from './source-check.service';
 import { createDeadline, type Deadline } from '../lib/deadline';
+import { extractJsonObject } from '../lib/json-extract';
+import { NotFoundError } from '../lib/ai-errors';
 import {
   eventGenerationSystemPrompt,
   eventGenerationUserPrompt,
@@ -39,7 +41,7 @@ const MAX_TOOL_ITERATIONS = 10;
  */
 const GENERATION_TIMEOUT_MS = Math.max(
   20_000,
-  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 100_000,
+  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 150_000,
 );
 
 /**
@@ -114,24 +116,7 @@ function cleanSources(sources: RawEvent['sources']): RawSource[] {
     .map((s) => ({ title: s.title || s.url, url: s.url }));
 }
 
-function extractJson(text: string): unknown {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    /* try to locate a JSON object */
-  }
-  const first = trimmed.indexOf('{');
-  const last = trimmed.lastIndexOf('}');
-  if (first !== -1 && last > first) {
-    try {
-      return JSON.parse(trimmed.slice(first, last + 1));
-    } catch {
-      /* ignore */
-    }
-  }
-  return null;
-}
+
 
 /** Prépare les connexions MCP actives (si la recherche web est activée). */
 async function prepareMcpConnections(): Promise<{
@@ -165,14 +150,33 @@ async function runChatWithTools(
   tools: ToolDefinition[],
   lookup: ReturnType<typeof mcpToolsToOpenAI>['lookup'],
   deadline: Deadline,
-): Promise<{ finalText: string; toolsUsed: boolean; toolCallingUnsupported: boolean }> {
+): Promise<{
+  finalText: string;
+  toolsUsed: boolean;
+  toolCallingUnsupported: boolean;
+  /** 'length' signale une réponse coupée faute de jetons. */
+  finishReason: string | null;
+}> {
   let toolsUsed = false;
   const signal = deadline.signal;
 
   // Sans outils : appel simple.
   if (tools.length === 0) {
-    const res = await chatCompletion(config, { messages, temperature: 0.8, signal });
-    return { finalText: res.message.content ?? '', toolsUsed: false, toolCallingUnsupported: false };
+    // Sans outils, le modèle ne doit produire QUE du JSON : on peut le lui
+    // imposer. Un fournisseur qui refuse `response_format` le fait savoir en
+    // 400, et la boucle de retrait des paramètres s'en charge.
+    const res = await chatCompletion(config, {
+      messages,
+      temperature: 0.8,
+      responseFormatJson: true,
+      signal,
+    });
+    return {
+      finalText: res.message.content ?? '',
+      toolsUsed: false,
+      toolCallingUnsupported: false,
+      finishReason: res.finishReason,
+    };
   }
 
   const working = [...messages];
@@ -195,12 +199,22 @@ async function runChatWithTools(
       res = await chatCompletion(config, { messages: working, tools, temperature: 0.8, signal });
     } catch (e) {
       // Modèle ne supportant pas le tool calling → repli sans outils.
-      if (e instanceof AiRequestError && (e.status === 400 || e.status === 404 || e.status === 422)) {
+      // On tente le repli pour TOUT refus du fournisseur (et pas seulement
+      // 400/404/422) : plusieurs passerelles répondent 500 ou 503 lorsqu'elles
+      // ne savent pas relayer les outils, et l'utilisateur n'obtenait alors
+      // rien du tout. Une expiration du budget, elle, n'a pas de statut et ne
+      // doit surtout pas relancer un appel.
+      if (e instanceof AiRequestError && e.status !== undefined && !deadline.expired()) {
+        console.warn(
+          `[events] le fournisseur a refusé les outils (HTTP ${e.status}) — ` +
+            'nouvelle tentative sans recherche web.',
+        );
         const fallback = await chatCompletion(config, { messages, temperature: 0.8, signal });
         return {
           finalText: fallback.message.content ?? '',
           toolsUsed,
           toolCallingUnsupported: true,
+          finishReason: fallback.finishReason,
         };
       }
       throw e;
@@ -208,7 +222,12 @@ async function runChatWithTools(
 
     const toolCalls = res.message.tool_calls;
     if (!toolCalls || toolCalls.length === 0) {
-      return { finalText: res.message.content ?? '', toolsUsed, toolCallingUnsupported: false };
+      return {
+        finalText: res.message.content ?? '',
+        toolsUsed,
+        toolCallingUnsupported: false,
+        finishReason: res.finishReason,
+      };
     }
 
     // On rejoue le message assistant contenant les appels d'outils.
@@ -225,11 +244,22 @@ async function runChatWithTools(
         toolResult = 'Outil inconnu.';
       } else {
         toolsUsed = true;
+        // La spécification OpenAI veut une chaîne JSON, mais Ollama et
+        // plusieurs passerelles renvoient directement un objet. Le parser
+        // aveuglément vidait les paramètres : les outils étaient alors appelés
+        // sans argument, en boucle et sans résultat.
         let args: Record<string, unknown> = {};
-        try {
-          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-        } catch {
-          args = {};
+        const rawArgs: unknown = call.function.arguments;
+        if (rawArgs && typeof rawArgs === 'object') {
+          args = rawArgs as Record<string, unknown>;
+        } else if (typeof rawArgs === 'string' && rawArgs.trim()) {
+          try {
+            args = JSON.parse(rawArgs);
+          } catch {
+            console.warn(
+              `[events] arguments illisibles pour ${call.function.name} : ${rawArgs.slice(0, 200)}`,
+            );
+          }
         }
         try {
           toolResult = await callMcpTool(entry, args, signal);
@@ -250,8 +280,46 @@ async function runChatWithTools(
 
   // Budget épuisé ou trop d'itérations : on force une réponse finale sans
   // outils, à partir de ce qui a déjà été trouvé.
-  const finalRes = await chatCompletion(config, { messages: working, temperature: 0.7, signal });
-  return { finalText: finalRes.message.content ?? '', toolsUsed, toolCallingUnsupported: false };
+  // Certains fournisseurs refusent un historique contenant des `tool_calls`
+  // si le tableau `tools` n'accompagne pas la requête. On le conserve donc, en
+  // interdisant simplement d'en appeler de nouveaux.
+  try {
+    const finalRes = await chatCompletion(config, {
+      messages: working,
+      temperature: 0.7,
+      tools,
+      toolChoice: 'none',
+      responseFormatJson: true,
+      signal,
+    });
+    return {
+      finalText: finalRes.message.content ?? '',
+      toolsUsed,
+      toolCallingUnsupported: false,
+      finishReason: finalRes.finishReason,
+    };
+  } catch (e) {
+    // Dernier recours : repartir de la consigne d'origine, sans l'historique
+    // d'outils. Mieux vaut une liste établie de mémoire qu'une erreur sèche.
+    if (e instanceof AiRequestError && e.status !== undefined && !deadline.expired()) {
+      console.warn(
+        `[events] rédaction finale refusée (HTTP ${e.status}) — reprise sans historique d'outils.`,
+      );
+      const rescue = await chatCompletion(config, {
+        messages,
+        temperature: 0.7,
+        responseFormatJson: true,
+        signal,
+      });
+      return {
+        finalText: rescue.message.content ?? '',
+        toolsUsed,
+        toolCallingUnsupported: false,
+        finishReason: rescue.finishReason,
+      };
+    }
+    throw e;
+  }
 }
 
 export async function generateEvents(input: GeneratedEventInput): Promise<EventGenerationResult> {
@@ -303,26 +371,78 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   let finalText = '';
   let toolsUsed = false;
   let toolCallingUnsupported = false;
+  let finishReason: string | null = null;
   const deadline = createDeadline(GENERATION_TIMEOUT_MS);
   try {
     const result = await runChatWithTools(config, messages, tools, lookup, deadline);
     finalText = result.finalText;
     toolsUsed = result.toolsUsed;
     toolCallingUnsupported = result.toolCallingUnsupported;
+    finishReason = result.finishReason;
   } finally {
     deadline.dispose();
     await Promise.all(connections.map((c) => c.close()));
   }
 
-  const parsed = extractJson(finalText) as { events?: RawEvent[] } | null;
+  // `length` : le modèle a été coupé faute de jetons. Son JSON est alors
+  // syntaxiquement invalide, alors que les événements déjà écrits sont
+  // parfaitement lisibles — l'extracteur les récupère.
+  const truncated = finishReason === 'length';
+  const extracted = extractJsonObject(finalText, { requiredKey: 'events' });
+  const parsed = extracted?.value as Record<string, unknown> | undefined;
+
+  /**
+   * Le schéma demandé est { events: [...] }, mais les modèles s'en écartent
+   * volontiers : tableau nu, ou clé nommée autrement. Rejeter ces réponses
+   * pourtant complètes n'apporte rien — on accepte la première liste d'objets
+   * trouvée à la racine.
+   */
+  const asEventList = (value: unknown): RawEvent[] | null => {
+    if (Array.isArray(value)) return value as RawEvent[];
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    for (const key of ['events', 'evenements', 'événements', 'items', 'results', 'data']) {
+      if (Array.isArray(record[key])) return record[key] as RawEvent[];
+    }
+    // Une seule valeur, et c'est une liste : c'est forcément celle-là.
+    const arrays = Object.values(record).filter(Array.isArray);
+    return arrays.length === 1 ? (arrays[0] as RawEvent[]) : null;
+  };
+
+  const eventList = asEventList(parsed);
+
   // Une réponse illisible est une erreur ; une liste VIDE est un résultat
   // légitime (le modèle n'a trouvé aucun événement dont il soit certain).
-  if (!parsed || !Array.isArray(parsed.events)) {
+  if (!eventList) {
+    // Journaliser AVANT de lever : sans cette trace, un échec de parsing ne
+    // laissait rien d'exploitable dans les logs, et le message générique
+    // accusait le modèle sans qu'on puisse le vérifier.
+    console.error(
+      `[events] réponse non exploitable — modèle=${config.model} ` +
+        `finish_reason=${finishReason ?? 'inconnu'} longueur=${finalText.length} car.\n` +
+        `  réponse brute (800 premiers caractères) :\n  ${finalText.slice(0, 800) || '(vide)'}`,
+    );
+
+    if (truncated) {
+      throw new AiRequestError(
+        "La réponse du modèle a été coupée avant d'être complète (limite de jetons atteinte) " +
+          "et rien n'a pu en être récupéré. Réduisez le nombre d'événements demandés ou de " +
+          'réseaux sociaux dans votre profil, ou augmentez AI_MAX_TOKENS.',
+      );
+    }
+    if (!finalText.trim()) {
+      throw new AiRequestError(
+        "Le modèle a renvoyé une réponse vide. Certains modèles de raisonnement ne " +
+          'produisent pas de texte exploitable ici : essayez-en un autre, ou désactivez le ' +
+          'mode de réflexion dans Paramètres → Modèle IA.',
+      );
+    }
     throw new AiRequestError(
-      "Le modèle n'a pas renvoyé de réponse exploitable. Réessayez ou changez de modèle.",
+      "Le modèle n'a pas renvoyé de JSON exploitable (voir les logs du serveur pour sa " +
+        `réponse exacte). Extrait : « ${finalText.trim().slice(0, 160)}… »`,
     );
   }
-  const rawEvents = parsed.events;
+  const rawEvents = eventList;
 
   const created: PrismaEvent[] = [];
   let discardedUncertain = 0;
@@ -376,6 +496,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   console.log(
     `[events] modèle=${config.model} web=${toolsUsed ? 'oui' : 'non'} ` +
       `durée=${Math.round(deadline.elapsedMs() / 1000)}s/${Math.round(GENERATION_TIMEOUT_MS / 1000)}s ` +
+      `fin=${finishReason ?? 'inconnu'}${extracted?.repaired ? ' (réponse réparée)' : ''} ` +
       `proposés=${rawEvents.length} retenus=${created.length} ` +
       `écartés(incertains)=${discardedUncertain} écartés(sans source)=${discardedUnsourced}`,
   );
@@ -384,6 +505,12 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   }
 
   const notices: string[] = [];
+  if (extracted?.repaired || truncated) {
+    notices.push(
+      'La réponse du modèle a été coupée avant la fin : les événements complets ont été ' +
+        "conservés, les derniers manquent. Demandez-en moins à la fois, ou augmentez AI_MAX_TOKENS.",
+    );
+  }
   if (webSearchRequested && !webSearchAvailable) {
     notices.push(
       "La recherche web MCP est activée mais aucun serveur n'a pu être contacté : recherche effectuée sans le web.",
@@ -432,7 +559,9 @@ export async function rephraseEvent(id: string): Promise<PrismaEvent> {
   const config = await getActiveAiConfig();
   const event = await prisma.event.findUnique({ where: { id } });
   if (!event) {
-    throw new AiRequestError('Événement introuvable.');
+    // Un identifiant inconnu n'est pas une panne du fournisseur IA : le
+    // signaler en 502 accusait un tiers à tort.
+    throw new NotFoundError('Événement introuvable.');
   }
   const messages: ChatMessage[] = [
     { role: 'system', content: eventRephraseSystemPrompt() },
@@ -441,13 +570,19 @@ export async function rephraseEvent(id: string): Promise<PrismaEvent> {
   const deadline = createDeadline(GENERATION_TIMEOUT_MS);
   let res;
   try {
-    res = await chatCompletion(config, { messages, temperature: 0.9, signal: deadline.signal });
+    res = await chatCompletion(config, {
+      messages,
+      temperature: 0.9,
+      responseFormatJson: true,
+      signal: deadline.signal,
+    });
   } finally {
     deadline.dispose();
   }
-  const parsed = extractJson(res.message.content ?? '') as
+  // Reformulation ratée : on conserve le texte d'origine plutôt que d'échouer.
+  const parsed = extractJsonObject(res.message.content ?? '', { requiredKey: 'title' })?.value as
     | { title?: string; description?: string }
-    | null;
+    | undefined;
   const title = (parsed?.title ?? event.title).toString().trim().slice(0, 300) || event.title;
   const description = (parsed?.description ?? event.description).toString().trim() || event.description;
   return prisma.event.update({ where: { id }, data: { title, description } });

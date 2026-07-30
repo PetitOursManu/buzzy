@@ -226,9 +226,61 @@ function extractModelIds(data: unknown): ModelInfo[] {
 export interface ChatOptions {
   messages: ChatMessage[];
   tools?: ToolDefinition[];
+  /**
+   * 'none' conserve la déclaration des outils sans autoriser de nouvel appel :
+   * indispensable pour la rédaction finale, plusieurs fournisseurs refusant un
+   * historique contenant des `tool_calls` si `tools` est absent.
+   */
+  toolChoice?: 'auto' | 'none';
   temperature?: number;
   responseFormatJson?: boolean;
+  /** Plafond de jetons produits. Voir DEFAULT_MAX_TOKENS. */
+  maxTokens?: number;
   signal?: AbortSignal;
+}
+
+/**
+ * Plafond de jetons demandé par défaut.
+ *
+ * Buzzy ne l'envoyait pas : le défaut du fournisseur s'appliquait, souvent
+ * quelques centaines de jetons. La réponse JSON était alors coupée en plein
+ * milieu, devenait illisible, et TOUTE génération échouait — systématiquement,
+ * avec un message qui accusait le modèle à tort.
+ *
+ * Neuf événements accompagnés d'une description par réseau social pèsent
+ * facilement 7 000 jetons ; on prévoit large.
+ */
+const DEFAULT_MAX_TOKENS = Math.max(
+  512,
+  Number.parseInt(process.env.AI_MAX_TOKENS ?? '', 10) || 8000,
+);
+
+/**
+ * Texte d'une réponse, quel que soit le format du fournisseur.
+ *
+ * `content` peut être une chaîne, un tableau de blocs typés, ou vide — auquel
+ * cas certains modèles de raisonnement placent leur sortie dans `reasoning`
+ * ou `reasoning_content`. Ne lire que `content` renvoyait alors une chaîne
+ * vide, indistinguable d'une panne.
+ */
+function messageText(message: any): string | null {
+  const direct = message?.content;
+  if (typeof direct === 'string' && direct.trim()) return direct;
+
+  if (Array.isArray(direct)) {
+    const joined = direct
+      .map((part: any) => (typeof part === 'string' ? part : (part?.text ?? '')))
+      .filter((s: unknown): s is string => typeof s === 'string' && s.length > 0)
+      .join('');
+    if (joined.trim()) return joined;
+  }
+
+  for (const key of ['reasoning_content', 'reasoning']) {
+    const fallback = message?.[key];
+    if (typeof fallback === 'string' && fallback.trim()) return fallback;
+  }
+
+  return typeof direct === 'string' ? direct : null;
 }
 
 /**
@@ -237,7 +289,12 @@ export interface ChatOptions {
  * pas — les modèles de raisonnement, notamment, rejettent fréquemment
  * `temperature` ou `reasoning_effort`. L'ordre est celui du retrait.
  */
-const OPTIONAL_PARAMS = ['reasoning_effort', 'response_format', 'temperature'] as const;
+const OPTIONAL_PARAMS = [
+  'reasoning_effort',
+  'response_format',
+  'temperature',
+  'max_tokens',
+] as const;
 
 /** Repère, dans le message d'erreur du fournisseur, un paramètre facultatif mis en cause. */
 function rejectedParam(errorText: string, body: Record<string, unknown>): string | null {
@@ -272,10 +329,15 @@ export async function chatCompletion(
   options: ChatOptions,
 ): Promise<ChatCompletionResult> {
   const url = `${config.baseUrl}/chat/completions`;
+  // listModels tente automatiquement « …/v1 » en repli ; si l'utilisateur n'a
+  // pas réenregistré l'URL ajustée, la base stockée peut être incomplète. On
+  // le détecte pour le dire clairement plutôt que de renvoyer un 404 opaque.
+  const missingVersionSuffix = !/\/v\d+$/.test(config.baseUrl);
   const body: Record<string, unknown> = {
     model: config.model,
     messages: options.messages,
     temperature: options.temperature ?? 0.7,
+    max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
   // Effort de réflexion (reasoning) — envoyé uniquement si configuré et non "none".
   // Format OpenAI standard : reasoning_effort.
@@ -285,7 +347,7 @@ export async function chatCompletion(
   }
   if (options.tools && options.tools.length > 0) {
     body.tools = options.tools;
-    body.tool_choice = 'auto';
+    body.tool_choice = options.toolChoice ?? 'auto';
   }
   if (options.responseFormatJson) {
     body.response_format = { type: 'json_object' };
@@ -298,6 +360,12 @@ export async function chatCompletion(
     // corps JSON ni explication. On préfère échouer nous-mêmes, avec un
     // message qui nomme la cause.
     const controller = new AbortController();
+    // Un `addEventListener('abort')` posé sur un signal DÉJÀ annulé ne se
+    // déclenche jamais : l'événement a eu lieu avant. Sans ce report explicite,
+    // un appel démarré après l'expiration du budget repartait pour un tour
+    // complet, hors de toute limite.
+    if (options.signal?.aborted) controller.abort(options.signal.reason);
+
     const timer = setTimeout(() => controller.abort(TIMEOUT_REASON), REQUEST_TIMEOUT_MS);
     const onExternalAbort = () => controller.abort(options.signal?.reason);
     options.signal?.addEventListener('abort', onExternalAbort, { once: true });
@@ -362,6 +430,33 @@ export async function chatCompletion(
     // On rapporte l'erreur d'origine : elle décrit le vrai refus, alors que la
     // dernière peut ne refléter qu'une tentative dégradée.
     const err = firstError ?? { status: res.status, text: await safeText(res) };
+
+    // 401/403 ne sont pas des pannes du fournisseur mais des problèmes de
+    // configuration, que l'utilisateur peut corriger. Les signaler en 502
+    // laissait croire à un incident distant. Piège classique : le test de
+    // connexion réussit sans clé valide (le catalogue /models est souvent
+    // public), et seule la génération révèle le problème.
+    if (err.status === 401 || err.status === 403) {
+      throw new AiConfigError(
+        `Le fournisseur a refusé la clé API (${err.status}). Vérifiez-la dans ` +
+          `Paramètres → Modèle IA. ${err.text || ''}`.trim(),
+      );
+    }
+    if (err.status === 402) {
+      throw new AiConfigError(
+        `Le fournisseur a refusé la requête pour une raison de facturation (402). ` +
+          `Vérifiez vos crédits. ${err.text || ''}`.trim(),
+      );
+    }
+
+    if (err.status === 404 && missingVersionSuffix) {
+      throw new AiConfigError(
+        `Le fournisseur a répondu 404 sur ${url}. L'URL de base ne se termine pas par ` +
+          `« /v1 » : c'est presque toujours la cause. Corrigez-la dans Paramètres → Modèle IA ` +
+          `(par exemple « ${config.baseUrl}/v1 »).`,
+      );
+    }
+
     throw new AiRequestError(
       `Le modèle a répondu ${err.status}. ${err.text || ''}`.trim(),
       err.status,
@@ -375,7 +470,7 @@ export async function chatCompletion(
   }
   const message: ChatMessage = {
     role: 'assistant',
-    content: choice.message?.content ?? null,
+    content: messageText(choice.message),
     tool_calls: choice.message?.tool_calls ?? undefined,
   };
   return {

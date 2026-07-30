@@ -1,6 +1,9 @@
 import type { Response } from 'express';
 import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
 
+/** Ressource absente. Distincte d'une panne du fournisseur IA. */
+export class NotFoundError extends Error {}
+
 /**
  * Traduction homogène d'une erreur d'appel IA en réponse HTTP.
  *
@@ -15,6 +18,10 @@ import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
  * - le reste       → 500 : bug côté Buzzy, avec la pile complète.
  */
 export function respondToAiError(res: Response, context: string, error: unknown): Response {
+  if (error instanceof NotFoundError) {
+    return res.status(404).json({ error: error.message });
+  }
+
   if (error instanceof AiConfigError) {
     console.warn(`[${context}] configuration IA incomplète : ${error.message}`);
     return res.status(400).json({ error: error.message });

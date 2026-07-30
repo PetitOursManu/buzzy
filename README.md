@@ -187,9 +187,10 @@ buzzy/
 | `PORT` | Port d'écoute du serveur | `3000` |
 | `NODE_ENV` | Environnement | `production` |
 | `CORS_ORIGIN` | (Optionnel) origine(s) autorisée(s) en dev | `http://localhost:5173` |
-| `BUZZY_GENERATION_TIMEOUT_MS` | Budget total d'une génération (défaut 100 000) | `150000` |
+| `BUZZY_GENERATION_TIMEOUT_MS` | Budget total d'une génération (défaut 150 000) | `180000` |
 | `AI_REQUEST_TIMEOUT_MS` | Délai d'un appel individuel au modèle (défaut 120 000) | `180000` |
 | `MCP_TOOL_TIMEOUT_MS` | Délai d'un appel d'outil MCP (défaut 25 000) | `40000` |
+| `AI_MAX_TOKENS` | Plafond de jetons demandé au modèle (défaut 8 000) | `12000` |
 | `SEARXNG_MCP_URL` | Serveur MCP de recherche pré-enregistré (vide = aucun) | `http://searxng-mcp:8000/mcp` |
 | `MCP_FETCH_URL` | Serveur MCP de lecture de pages pré-enregistré | `http://mcp-fetch:8000/mcp` |
 | `MCP_TIME_URL` | Serveur MCP de date pré-enregistré | `http://mcp-time:8000/mcp` |
@@ -307,14 +308,20 @@ Un **502** sur `/api/events/generate` ne signifie pas que Buzzy a planté : c'es
 docker compose logs -f app | grep "génération d'événements"
 ```
 
-| Message | Cause | Correctif |
-|---|---|---|
-| `Le modèle a répondu 401` | Clé API invalide ou expirée | Ressaisir la clé dans *Paramètres → Modèle IA* |
-| `Le modèle a répondu 402 / 429` | Crédits épuisés ou quota atteint | Vérifier votre compte chez le fournisseur |
-| `Le modèle a répondu 404` | Identifiant de modèle inexistant | *Tester la connexion* puis choisir dans la liste |
-| `Connexion impossible au modèle IA` | URL de base injoignable | Vérifier l'URL (souvent `…/v1`) et le réseau du conteneur |
-| `n'a pas répondu en moins de N s` | Modèle trop lent pour le délai | Modèle plus rapide, réflexion réduite, ou `AI_REQUEST_TIMEOUT_MS` plus élevé |
-| `n'a pas renvoyé de réponse exploitable` | Le modèle n'a pas produit de JSON valide | Modèle plus capable, ou désactiver le mode de réflexion |
+Attention : les erreurs de **configuration** ne renvoient pas 502 mais **400**, avec un message directement actionnable — une clé API refusée n'est pas une panne du fournisseur.
+
+| Message | Statut | Cause | Correctif |
+|---|---|---|---|
+| `Le fournisseur a refusé la clé API (401/403)` | 400 | Clé absente, invalide ou expirée | Ressaisir la clé dans *Paramètres → Modèle IA*. Piège fréquent : *Tester la connexion* réussit sans clé valide, car le catalogue `/models` est souvent public |
+| `raison de facturation (402)` | 400 | Crédits épuisés | Vérifier votre compte chez le fournisseur |
+| `404 … ne se termine pas par « /v1 »` | 400 | URL de base incomplète | Corriger l'URL dans *Paramètres → Modèle IA* |
+| `Le modèle a répondu 429 / 5xx` | 502 | Quota atteint, ou panne du fournisseur | Réessayer, vérifier l'état du service |
+| `Connexion impossible au modèle IA` | 502 | URL injoignable depuis le conteneur | Vérifier l'URL et le réseau Docker |
+| `n'a pas répondu en moins de N s` | 502 | Modèle trop lent | Modèle plus rapide, réflexion réduite, `AI_REQUEST_TIMEOUT_MS` plus élevé |
+| `a dépassé le temps qui lui est alloué` | 502 | Budget global épuisé | Moins de serveurs MCP actifs, ou `BUZZY_GENERATION_TIMEOUT_MS` plus élevé |
+| `coupée avant d'être complète` | 502 | Réponse tronquée, rien de récupérable | Moins d'événements demandés, ou `AI_MAX_TOKENS` plus élevé |
+| `réponse vide` | 502 | Modèle de raisonnement sans sortie exploitable | Autre modèle, ou désactiver le mode de réflexion |
+| `n'a pas renvoyé de JSON exploitable` | 502 | Réponse hors format | La réponse brute du modèle est journalisée : lisez-la |
 
 ### 502 de Buzzy, ou 502 du reverse-proxy ?
 

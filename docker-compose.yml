@@ -36,6 +36,14 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
       PORT: 3000
       NODE_ENV: production
+      # Délais et plafond de jetons. DOIVENT être déclarés ici : Coolify injecte
+      # les variables de son interface dans l'environnement de `docker compose`,
+      # mais seules celles listées dans ce fichier atteignent le conteneur.
+      # Sans ces lignes, les régler depuis l'interface reste sans effet.
+      BUZZY_GENERATION_TIMEOUT_MS: ${BUZZY_GENERATION_TIMEOUT_MS:-}
+      AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-}
+      AI_MAX_TOKENS: ${AI_MAX_TOKENS:-}
+      MCP_TOOL_TIMEOUT_MS: ${MCP_TOOL_TIMEOUT_MS:-}
       # Serveurs de recherche web MCP livrés avec la stack (ci-dessous).
       # Pré-enregistrés DÉSACTIVÉS dans Buzzy au démarrage ; il reste à les
       # cocher dans Paramètres → Recherche Web (MCP).
