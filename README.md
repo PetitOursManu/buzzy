@@ -187,6 +187,7 @@ buzzy/
 | `PORT` | Port d'écoute du serveur | `3000` |
 | `NODE_ENV` | Environnement | `production` |
 | `CORS_ORIGIN` | (Optionnel) origine(s) autorisée(s) en dev | `http://localhost:5173` |
+| `AI_REQUEST_TIMEOUT_MS` | Délai maximal d'un appel au modèle (défaut 120 000) | `180000` |
 | `SEARXNG_MCP_URL` | Serveur MCP de recherche pré-enregistré (vide = aucun) | `http://searxng-mcp:8000/mcp` |
 | `MCP_FETCH_URL` | Serveur MCP de lecture de pages pré-enregistré | `http://mcp-fetch:8000/mcp` |
 | `MCP_TIME_URL` | Serveur MCP de date pré-enregistré | `http://mcp-time:8000/mcp` |
@@ -293,6 +294,29 @@ Vous pouvez ajouter **n'importe quel serveur MCP personnalisé** — la liste n'
 > **Pourquoi pas un profil Compose ?** Coolify injecte les variables d'environnement dans les conteneurs, mais ne les transmet pas à la commande `docker compose` : un `COMPOSE_PROFILES` défini dans son interface ne démarrerait jamais les services. Les services sont donc déclarés sans profil ; la recherche web reste inactive côté application tant qu'elle n'est pas activée dans les paramètres.
 >
 > Pour ne pas déployer SearXNG du tout : supprimez les services `searxng` / `searxng-mcp` du `docker-compose.yml` et laissez `SEARXNG_MCP_URL` vide.
+
+---
+
+## 🩺 Diagnostiquer une erreur de génération
+
+Un **502** sur `/api/events/generate` ne signifie pas que Buzzy a planté : c'est le code renvoyé quand l'appel au **fournisseur IA** échoue. La cause exacte est toujours écrite dans les logs du serveur :
+
+```bash
+docker compose logs -f app | grep "génération d'événements"
+```
+
+| Message | Cause | Correctif |
+|---|---|---|
+| `Le modèle a répondu 401` | Clé API invalide ou expirée | Ressaisir la clé dans *Paramètres → Modèle IA* |
+| `Le modèle a répondu 402 / 429` | Crédits épuisés ou quota atteint | Vérifier votre compte chez le fournisseur |
+| `Le modèle a répondu 404` | Identifiant de modèle inexistant | *Tester la connexion* puis choisir dans la liste |
+| `Connexion impossible au modèle IA` | URL de base injoignable | Vérifier l'URL (souvent `…/v1`) et le réseau du conteneur |
+| `n'a pas répondu en moins de N s` | Modèle trop lent pour le délai | Modèle plus rapide, réflexion réduite, ou `AI_REQUEST_TIMEOUT_MS` plus élevé |
+| `n'a pas renvoyé de réponse exploitable` | Le modèle n'a pas produit de JSON valide | Modèle plus capable, ou désactiver le mode de réflexion |
+
+Si l'interface affiche seulement **« Erreur 502 »** sans phrase explicative, le 502 ne vient pas de Buzzy mais de votre **reverse-proxy**, qui a coupé la requête avant la fin de la génération. Augmentez son délai de lecture (Coolify / Traefik / nginx) et gardez `AI_REQUEST_TIMEOUT_MS` en dessous, pour que Buzzy réponde toujours le premier.
+
+L'onglet **Paramètres → Diagnostic** vérifie en un écran le fournisseur, le modèle, la clé et la joignabilité de chaque serveur MCP actif.
 
 ---
 

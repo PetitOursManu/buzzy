@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { aiGenerationLimiter } from '../middleware/rateLimit';
 import { postCreateSchema, postDuplicateSchema, postUpdateSchema } from './schemas';
 import { regeneratePost } from '../services/calendar.service';
-import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
+import { respondToAiError } from '../lib/ai-errors';
 
 const router = Router();
 router.use(requireAuth);
@@ -162,10 +162,7 @@ router.post('/:id/regenerate', aiGenerationLimiter, async (req, res) => {
     const post = await regeneratePost(id);
     return res.json(post);
   } catch (e) {
-    if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
-    if (e instanceof AiRequestError) return res.status(502).json({ error: e.message });
-    console.error('Erreur régénération post:', e);
-    return res.status(500).json({ error: 'Erreur lors de la régénération de la publication.' });
+    return respondToAiError(res, "régénération d'une publication", e);
   }
 });
 

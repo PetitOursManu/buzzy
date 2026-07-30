@@ -218,6 +218,7 @@ router.post('/ai-provider/list-models', validate(listModelsSchema), async (req, 
       e instanceof AiRequestError
         ? e.message
         : "Erreur lors de la récupération des modèles. Vérifiez l'URL de base et la clé API.";
+    console.error(`[liste des modèles] ${baseUrl} : ${message}`);
     return res.status(502).json({ error: message });
   }
 });

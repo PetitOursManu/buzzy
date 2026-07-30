@@ -12,7 +12,7 @@ import {
   deleteEventsSchema,
 } from './schemas';
 import { generateEvents, planEvents, rephraseEvent } from '../services/event.service';
-import { AiConfigError, AiRequestError } from '../services/ai-provider.service';
+import { respondToAiError } from '../lib/ai-errors';
 import type { EventScope, Prisma } from '@prisma/client';
 
 const router = Router();
@@ -56,10 +56,7 @@ router.post('/:id/rephrase', aiGenerationLimiter, async (req, res) => {
     const event = await rephraseEvent(req.params.id);
     return res.json(event);
   } catch (e) {
-    if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
-    if (e instanceof AiRequestError) return res.status(502).json({ error: e.message });
-    console.error('Erreur alternative événement:', e);
-    return res.status(500).json({ error: "Erreur lors de la génération de l'alternative." });
+    return respondToAiError(res, "reformulation d'un événement", e);
   }
 });
 
@@ -179,14 +176,7 @@ router.post('/generate', aiGenerationLimiter, validate(eventGenerateSchema), asy
       notice: result.notice ?? null,
     });
   } catch (e) {
-    if (e instanceof AiConfigError) {
-      return res.status(400).json({ error: e.message });
-    }
-    if (e instanceof AiRequestError) {
-      return res.status(502).json({ error: e.message });
-    }
-    console.error('Erreur génération événements:', e);
-    return res.status(500).json({ error: "Erreur inattendue lors de la génération d'événements." });
+    return respondToAiError(res, "génération d'événements", e);
   }
 });
 
@@ -209,10 +199,7 @@ router.post('/plan', aiGenerationLimiter, validate(eventPlanSchema), async (req,
     });
     return res.json({ plan: result.plan });
   } catch (e) {
-    if (e instanceof AiConfigError) return res.status(400).json({ error: e.message });
-    if (e instanceof AiRequestError) return res.status(502).json({ error: e.message });
-    console.error('Erreur planification événements:', e);
-    return res.status(500).json({ error: 'Erreur inattendue lors de la planification.' });
+    return respondToAiError(res, 'planification des événements', e);
   }
 });
 

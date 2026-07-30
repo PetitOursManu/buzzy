@@ -252,6 +252,19 @@ function isParamRejection(status: number): boolean {
   return status === 400 || status === 404 || status === 422;
 }
 
+/**
+ * Délai maximal d'un appel au modèle. Généreux par défaut : une génération
+ * avec recherche web enchaîne plusieurs allers-retours d'outils, et un modèle
+ * de raisonnement peut légitimement mettre une minute.
+ */
+const REQUEST_TIMEOUT_MS = Math.max(
+  10_000,
+  Number.parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '', 10) || 120_000,
+);
+
+/** Marqueur permettant de distinguer notre expiration d'une annulation externe. */
+const TIMEOUT_REASON = Symbol('buzzy-ai-timeout');
+
 /** Appel de chat completion compatible OpenAI. */
 export async function chatCompletion(
   config: AiProviderConfig,
@@ -278,15 +291,35 @@ export async function chatCompletion(
   }
 
   const attempt = async (payload: Record<string, unknown>): Promise<Response> => {
+    // Sans délai maximal, un fournisseur qui ne répond pas laisse la requête
+    // ouverte indéfiniment : c'est alors le reverse-proxy (Coolify, Traefik,
+    // nginx…) qui coupe au bout d'une minute et renvoie SON PROPRE 502, sans
+    // corps JSON ni explication. On préfère échouer nous-mêmes, avec un
+    // message qui nomme la cause.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(TIMEOUT_REASON), REQUEST_TIMEOUT_MS);
+    const onExternalAbort = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', onExternalAbort, { once: true });
+
     try {
       return await fetch(url, {
         method: 'POST',
         headers: authHeaders(config.apiKey),
         body: JSON.stringify(payload),
-        signal: options.signal,
+        signal: controller.signal,
       });
     } catch (e) {
+      if (controller.signal.reason === TIMEOUT_REASON) {
+        throw new AiRequestError(
+          `Le modèle n'a pas répondu en moins de ${Math.round(REQUEST_TIMEOUT_MS / 1000)} s. ` +
+            'Essayez un modèle plus rapide, réduisez le mode de réflexion, ou augmentez ' +
+            'AI_REQUEST_TIMEOUT_MS.',
+        );
+      }
       throw new AiRequestError(`Connexion impossible au modèle IA. (${(e as Error).message})`);
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onExternalAbort);
     }
   };
 
