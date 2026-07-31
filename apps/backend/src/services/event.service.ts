@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import {
   chatCompletion,
   getActiveAiConfig,
+  AiConfigError,
   AiRequestError,
   type ChatMessage,
   type ToolDefinition,
@@ -21,8 +22,8 @@ import {
   eventGenerationUserPrompt,
   eventPlanSystemPrompt,
   eventPlanUserPrompt,
-  eventRephraseSystemPrompt,
-  eventRephraseUserPrompt,
+  eventNetworkTextsSystemPrompt,
+  eventNetworkTextsUserPrompt,
   type EventGenParams,
   type DateTarget,
 } from '../prompts';
@@ -374,6 +375,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
     plan: input.plan,
     preferredNetworks,
     prioritySources: profile?.prioritySources ?? undefined,
+    profile,
   };
 
   const messages: ChatMessage[] = [
@@ -568,19 +570,40 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   };
 }
 
-/** Génère une alternative (reformulation) du titre et de la description d'un événement. */
-export async function rephraseEvent(id: string): Promise<PrismaEvent> {
-  const config = await getActiveAiConfig();
+/**
+ * Régénère les descriptions PAR RÉSEAU d'un événement.
+ *
+ * L'ancienne « reformulation » réécrivait le titre et la description factuelle
+ * — les seules données qu'il ne faut justement pas toucher, puisqu'elles
+ * décrivent l'événement réel — et laissait intacts les textes par réseau, qui
+ * sont pourtant ce que l'utilisateur publie. Elle ignorait de surcroît le
+ * profil éditorial : les textes sortaient génériques.
+ */
+export async function regenerateEventTexts(id: string): Promise<PrismaEvent> {
   const event = await prisma.event.findUnique({ where: { id } });
   if (!event) {
     // Un identifiant inconnu n'est pas une panne du fournisseur IA : le
     // signaler en 502 accusait un tiers à tort.
     throw new NotFoundError('Événement introuvable.');
   }
+
+  const profile = await prisma.userProfile.findFirst({ orderBy: { updatedAt: 'desc' } });
+  const networks = profile?.preferredNetworks ?? [];
+  if (networks.length === 0) {
+    throw new AiConfigError(
+      "Aucun réseau social retenu dans votre profil : il n'y a aucun texte à régénérer. " +
+        'Choisissez vos réseaux dans Paramètres → Profil & réseaux.',
+    );
+  }
+
+  const config = await getActiveAiConfig();
+  const previous = (event.networkDescriptions as Record<string, string> | null) ?? null;
+
   const messages: ChatMessage[] = [
-    { role: 'system', content: eventRephraseSystemPrompt() },
-    { role: 'user', content: eventRephraseUserPrompt(event.title, event.description) },
+    { role: 'system', content: eventNetworkTextsSystemPrompt(profile) },
+    { role: 'user', content: eventNetworkTextsUserPrompt(event, networks, previous) },
   ];
+
   const deadline = createDeadline(GENERATION_TIMEOUT_MS);
   let res;
   try {
@@ -593,13 +616,29 @@ export async function rephraseEvent(id: string): Promise<PrismaEvent> {
   } finally {
     deadline.dispose();
   }
-  // Reformulation ratée : on conserve le texte d'origine plutôt que d'échouer.
-  const parsed = extractJsonObject(res.message.content ?? '', { requiredKey: 'title' })?.value as
-    | { title?: string; description?: string }
-    | undefined;
-  const title = (parsed?.title ?? event.title).toString().trim().slice(0, 300) || event.title;
-  const description = (parsed?.description ?? event.description).toString().trim() || event.description;
-  return prisma.event.update({ where: { id }, data: { title, description } });
+
+  const parsed = extractJsonObject(res.message.content ?? '', {
+    requiredKey: 'networkDescriptions',
+  })?.value as { networkDescriptions?: Record<string, unknown> } | undefined;
+
+  // Le modèle omet parfois l'enveloppe et renvoie directement { linkedin: … }.
+  const raw = parsed?.networkDescriptions ?? (parsed as Record<string, unknown> | undefined);
+  const descriptions = cleanNetworkDescriptions(raw, networks);
+
+  if (!descriptions) {
+    console.error(
+      `[events] régénération des textes sans résultat exploitable — modèle=${config.model} ` +
+        `fin=${res.finishReason ?? 'inconnu'} : ${(res.message.content ?? '').slice(0, 400)}`,
+    );
+    throw new AiRequestError(
+      "Le modèle n'a produit aucun texte exploitable pour vos réseaux. Réessayez, ou changez de modèle.",
+    );
+  }
+
+  return prisma.event.update({
+    where: { id },
+    data: { networkDescriptions: descriptions as unknown as Prisma.InputJsonValue },
+  });
 }
 
 export interface PlanInput {
@@ -631,6 +670,7 @@ export async function planEvents(input: PlanInput): Promise<{ plan: string }> {
     webSearchEnabled: webSearchAvailable,
     preferredNetworks: [],
     prioritySources: profile?.prioritySources ?? undefined,
+    profile,
   };
 
   const messages: ChatMessage[] = [

@@ -278,7 +278,9 @@ export const eventsApi = {
     request<{ ok: boolean; id: string; unlinkedPosts: number }>(`/events/${id}`, {
       method: 'DELETE',
     }),
-  rephrase: (id: string) => request<EventItem>(`/events/${id}/rephrase`, { method: 'POST' }),
+  /** Réécrit le texte de chaque réseau retenu au profil, sans toucher aux faits. */
+  regenerateTexts: (id: string) =>
+    request<EventItem>(`/events/${id}/regenerate-texts`, { method: 'POST' }),
   deleteHistory: (exceptIds: string[]) =>
     request<{ deleted: number; unlinkedPosts: number }>('/events', {
       method: 'DELETE',

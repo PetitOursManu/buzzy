@@ -227,7 +227,7 @@ buzzy/
 | POST | `/api/events/manual` | Crée un événement à la main |
 | PUT / DELETE | `/api/events/:id` | Modifie / supprime un événement |
 | DELETE | `/api/events` | Vide l'historique (hors `exceptIds`) |
-| POST | `/api/events/:id/rephrase` | Reformule titre et description |
+| POST | `/api/events/:id/regenerate-texts` | Réécrit le texte de chaque réseau selon le profil |
 | POST | `/api/calendar/generate` | Génère un calendrier éditorial complet |
 | POST | `/api/calendar` | Crée un calendrier vide |
 | GET | `/api/calendar` | Liste les calendriers |
@@ -330,7 +330,7 @@ Le **524** est propre à Cloudflare : l'origine n'a pas répondu dans les **100 
 
 Aucun réglage applicatif ne peut la contourner. C'est pourquoi la découverte d'événements **ne s'exécute plus dans la requête HTTP** : `POST /api/events/generate` démarre une tâche et répond immédiatement `202 { jobId }` ; le navigateur suit l'avancement via `GET /api/events/generate/:jobId`, par des requêtes qui durent quelques millisecondes. La génération peut alors prendre le temps qu'il faut — l'interface affiche l'étape en cours et le temps écoulé.
 
-Si un 524 apparaît malgré tout, il ne vient pas de la génération mais d'une autre route restée synchrone (plan, reformulation, régénération d'une publication). Celles-ci n'effectuent qu'un seul appel au modèle, borné par `AI_REQUEST_TIMEOUT_MS` (80 s par défaut, sous le plafond de Cloudflare). Un modèle plus lent que cela demande soit un modèle plus rapide, soit un mode de réflexion réduit.
+Si un 524 apparaît malgré tout, il ne vient pas de la génération mais d'une autre route restée synchrone (plan, textes par réseau, régénération d'une publication). Celles-ci n'effectuent qu'un seul appel au modèle, borné par `AI_REQUEST_TIMEOUT_MS` (80 s par défaut, sous le plafond de Cloudflare). Un modèle plus lent que cela demande soit un modèle plus rapide, soit un mode de réflexion réduit.
 
 ### 502 de Buzzy, ou 502 du reverse-proxy ?
 

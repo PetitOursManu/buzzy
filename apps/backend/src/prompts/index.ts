@@ -31,6 +31,13 @@ export interface EventGenParams {
   plan?: string; // plan validé par l'utilisateur (mode planification)
   preferredNetworks: string[]; // descriptions par réseau à générer pour chaque événement
   prioritySources?: string; // sources à privilégier pour trouver/sourcer les événements
+  /**
+   * Profil éditorial de l'utilisateur.
+   *
+   * N'oriente QUE les descriptions par réseau : la description factuelle de
+   * l'événement doit rester neutre et vérifiable, quel que soit le ton choisi.
+   */
+  profile?: UserProfile | null;
 }
 
 /** Consigne de longueur/ton pour une description d'événement adaptée à un réseau. */
@@ -143,6 +150,12 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
     ? [
         '',
         `Pour CHAQUE événement, rédige aussi une description prête à publier, adaptée à chacun de ces réseaux : ${params.preferredNetworks.join(', ')}.`,
+        '',
+        // Sans ce bloc, les textes par réseau sortaient génériques : ils ne
+        // portaient ni l'activité, ni le ton, ni les interdits de l'utilisateur.
+        "Ces descriptions doivent être écrites DU POINT DE VUE de l'utilisateur, pour son audience :",
+        profileBlock(params.profile ?? null),
+        '',
         'Respecte le ton et la longueur propres à chaque réseau :',
         ...params.preferredNetworks.map((n) => `  • ${networkDescGuideline(n)}`),
       ].join('\n')
@@ -192,7 +205,10 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
       : []),
     ...(multiRegionConstraint ? [multiRegionConstraint] : []),
     ...(hasNetworks
-      ? ['- Fournis une description distincte par réseau demandé dans "networkDescriptions".']
+      ? [
+          '- Fournis une description distincte par réseau demandé dans "networkDescriptions", rédigée avec le ton et pour l\'audience du profil ci-dessus.',
+          '- En revanche, le champ "description" reste FACTUEL et neutre : c\'est la fiche de l\'événement, pas un message de communication.',
+        ]
       : []),
     "- Varie les thèmes et les types d'événements.",
     '- SOURCES : chaque URL doit exister réellement. Un lien inventé est PIRE que pas de lien — il sera automatiquement détecté et supprimé.',
@@ -204,22 +220,74 @@ export function eventGenerationUserPrompt(params: EventGenParams): string {
   ].join('\n');
 }
 
-/* ─── Alternative d'un événement (reformulation) ───────────────── */
+/* ─── Régénération des textes par réseau ───────────────────────── */
 
-export function eventRephraseSystemPrompt(): string {
+/**
+ * Réécrit les descriptions par réseau d'un événement déjà découvert.
+ *
+ * Les FAITS ne bougent pas — titre, dates, lieu, sources restent ceux de
+ * l'événement. Seule la manière de le raconter change, selon le réseau visé et
+ * le profil éditorial de l'utilisateur.
+ */
+export function eventNetworkTextsSystemPrompt(profile: UserProfile | null): string {
   return [
-    "Tu es un expert en rédaction et veille d'événements.",
-    "On te donne le titre et la description d'un événement. Propose une ALTERNATIVE : une reformulation différente du titre ET de la description, en conservant le même événement et les mêmes faits, mais avec un angle et une formulation nouveaux.",
-    'Réponds UNIQUEMENT en JSON valide : { "title": string, "description": string }.',
-  ].join(' ');
+    'Tu es le rédacteur en communication de cette organisation :',
+    '',
+    profileBlock(profile),
+    '',
+    "On te donne un événement réel. Rédige, pour chaque réseau demandé, une description prête à publier qui met cet événement en avant DU POINT DE VUE de cette organisation, avec son ton et pour son audience.",
+    "N'invente aucun fait : ni date, ni lieu, ni chiffre, ni partenaire qui ne figure pas dans l'événement fourni.",
+    'Varie les angles par rapport aux textes précédents, si on te les donne.',
+    '',
+    'Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.',
+  ].join('\n');
 }
 
-export function eventRephraseUserPrompt(title: string, description: string): string {
+export function eventNetworkTextsUserPrompt(
+  event: {
+    title: string;
+    description: string;
+    theme: string;
+    region?: string | null;
+    eventDate?: Date | null;
+    eventPeriod?: string | null;
+  },
+  networks: string[],
+  previous?: Record<string, string> | null,
+): string {
+  const when = event.eventDate
+    ? event.eventDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : (event.eventPeriod ?? 'date à préciser');
+
+  const previousPart =
+    previous && Object.keys(previous).length > 0
+      ? [
+          '',
+          'Textes actuels, à REMPLACER par des versions nettement différentes :',
+          ...Object.entries(previous).map(([net, text]) => `  • ${net} : ${text}`),
+        ]
+      : [];
+
+  const shape = networks.reduce<Record<string, string>>((acc, n) => {
+    acc[n] = `string (description adaptée à ${n})`;
+    return acc;
+  }, {});
+
   return [
-    `Titre actuel : ${title}`,
-    `Description actuelle : ${description}`,
+    "Événement :",
+    `- Titre : ${event.title}`,
+    `- Thème : ${event.theme}`,
+    `- Quand : ${when}`,
+    ...(event.region ? [`- Où : ${event.region}`] : []),
+    `- Description factuelle : ${event.description}`,
+    ...previousPart,
     '',
-    'Propose une alternative : un titre court reformulé et une description de 2 à 3 phrases reformulée.',
+    `Rédige une description par réseau pour : ${networks.join(', ')}.`,
+    'Respecte le ton et la longueur propres à chaque réseau :',
+    ...networks.map((n) => `  • ${networkDescGuideline(n)}`),
+    '',
+    'Schéma JSON attendu :',
+    JSON.stringify({ networkDescriptions: shape }, null, 2),
   ].join('\n');
 }
 

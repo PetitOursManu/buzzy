@@ -183,14 +183,14 @@ export function EventCard({
   event,
   selected,
   onToggleSelect,
-  onRephrased,
+  onTextsRegenerated,
   onEdit,
   onDelete,
 }: {
   event: EventItem;
   selected: boolean;
   onToggleSelect: (id: string) => void;
-  onRephrased?: (updated: EventItem) => void;
+  onTextsRegenerated?: (updated: EventItem) => void;
   onEdit?: (event: EventItem) => void;
   onDelete?: (event: EventItem) => void;
 }) {
@@ -198,11 +198,17 @@ export function EventCard({
   const hasNetworkDescriptions =
     event.networkDescriptions && Object.keys(event.networkDescriptions).length > 0;
 
-  const rephrase = useMutation({
-    mutationFn: () => eventsApi.rephrase(event.id),
+  // Réécrit uniquement les textes par réseau, à partir du profil. Les faits
+  // (titre, description, date, sources) restent tels qu'ils ont été vérifiés.
+  const regenerate = useMutation({
+    mutationFn: () => eventsApi.regenerateTexts(event.id),
     onSuccess: (updated) => {
-      toast('Alternative générée.', 'success');
-      onRephrased?.(updated);
+      const count = Object.keys(updated.networkDescriptions ?? {}).length;
+      toast(
+        count > 1 ? `${count} textes réécrits selon votre profil.` : 'Texte réécrit selon votre profil.',
+        'success',
+      );
+      onTextsRegenerated?.(updated);
     },
     onError: (e) =>
       toast(e instanceof ApiError ? e.message : 'Erreur lors de la génération.', 'error'),
@@ -290,11 +296,15 @@ export function EventCard({
           size="sm"
           variant="ghost"
           icon="refresh"
-          loading={rephrase.isPending}
-          onClick={() => rephrase.mutate()}
-          title="Reformuler le titre et la description via l'IA"
+          loading={regenerate.isPending}
+          onClick={() => regenerate.mutate()}
+          title={
+            hasNetworkDescriptions
+              ? 'Réécrire le texte de chaque réseau à partir de votre profil (ton, audience, restrictions)'
+              : 'Rédiger un texte par réseau à partir de votre profil (ton, audience, restrictions)'
+          }
         >
-          Reformuler
+          {hasNetworkDescriptions ? 'Réécrire les textes' : 'Rédiger les textes'}
         </Button>
       </div>
     </motion.article>

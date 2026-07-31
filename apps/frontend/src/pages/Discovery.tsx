@@ -625,7 +625,7 @@ export function DiscoveryPage() {
                       event={ev}
                       selected={selectedIds.includes(ev.id)}
                       onToggleSelect={toggle}
-                      onRephrased={updateNewEvent}
+                      onTextsRegenerated={updateNewEvent}
                       onEdit={openEdit}
                       onDelete={askDeleteEvent}
                     />
@@ -699,7 +699,7 @@ export function DiscoveryPage() {
                       event={ev}
                       selected={selectedIds.includes(ev.id)}
                       onToggleSelect={toggle}
-                      onRephrased={invalidateEvents}
+                      onTextsRegenerated={invalidateEvents}
                       onEdit={openEdit}
                       onDelete={askDeleteEvent}
                     />

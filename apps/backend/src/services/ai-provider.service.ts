@@ -314,7 +314,7 @@ function isParamRejection(status: number): boolean {
  * Délai maximal d'un appel au modèle.
  *
  * Volontairement sous les 100 s de Cloudflare : les routes encore synchrones
- * (plan, reformulation, régénération d'une publication) doivent répondre avant
+ * (plan, textes par réseau, régénération d'une publication) doivent répondre avant
  * que l'intermédiaire ne coupe, sans quoi l'utilisateur reçoit un 524 nu à la
  * place du message d'erreur.
  */

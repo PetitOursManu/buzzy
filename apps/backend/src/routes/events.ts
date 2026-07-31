@@ -11,7 +11,7 @@ import {
   eventUpdateSchema,
   deleteEventsSchema,
 } from './schemas';
-import { generateEvents, planEvents, rephraseEvent } from '../services/event.service';
+import { generateEvents, planEvents, regenerateEventTexts } from '../services/event.service';
 import { describeAiError, respondToAiError } from '../lib/ai-errors';
 import { getJob, startJob } from '../lib/jobs';
 import type { EventScope, Prisma } from '@prisma/client';
@@ -51,13 +51,17 @@ router.post('/manual', validate(manualEventSchema), async (req, res) => {
   return res.status(201).json(event);
 });
 
-/** Génère une alternative (reformulation IA) du titre et de la description. */
-router.post('/:id/rephrase', aiGenerationLimiter, async (req, res) => {
+/**
+ * Réécrit le texte de l'événement pour chaque réseau retenu dans le profil.
+ * Le titre, la description factuelle, la date et les sources sont conservés :
+ * seul `networkDescriptions` change.
+ */
+router.post('/:id/regenerate-texts', aiGenerationLimiter, async (req, res) => {
   try {
-    const event = await rephraseEvent(req.params.id);
+    const event = await regenerateEventTexts(req.params.id);
     return res.json(event);
   } catch (e) {
-    return respondToAiError(res, "reformulation d'un événement", e);
+    return respondToAiError(res, 'régénération des textes par réseau', e);
   }
 });
 
