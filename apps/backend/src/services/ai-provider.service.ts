@@ -311,13 +311,16 @@ function isParamRejection(status: number): boolean {
 }
 
 /**
- * Délai maximal d'un appel au modèle. Généreux par défaut : une génération
- * avec recherche web enchaîne plusieurs allers-retours d'outils, et un modèle
- * de raisonnement peut légitimement mettre une minute.
+ * Délai maximal d'un appel au modèle.
+ *
+ * Volontairement sous les 100 s de Cloudflare : les routes encore synchrones
+ * (plan, reformulation, régénération d'une publication) doivent répondre avant
+ * que l'intermédiaire ne coupe, sans quoi l'utilisateur reçoit un 524 nu à la
+ * place du message d'erreur.
  */
 const REQUEST_TIMEOUT_MS = Math.max(
   10_000,
-  Number.parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '', 10) || 120_000,
+  Number.parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '', 10) || 80_000,
 );
 
 /** Marqueur permettant de distinguer notre expiration d'une annulation externe. */

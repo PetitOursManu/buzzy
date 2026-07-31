@@ -143,6 +143,9 @@ export function DiscoveryPage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [planText, setPlanText] = useState<string | null>(null);
+  // Une génération dure souvent plus d'une minute : sans compte rendu, on
+  // croit l'application figée.
+  const [progress, setProgress] = useState<{ message: string; seconds: number } | null>(null);
 
   /* Historique : recherche + pagination */
   const [search, setSearch] = useState('');
@@ -219,15 +222,20 @@ export function DiscoveryPage() {
     mutationFn: async (args: { mode: 'new' | 'more'; plan?: string }) => {
       const dateTarget = buildDateTarget();
       if (!dateTarget) throw new ApiError('Renseignez la cible temporelle.', 400);
-      return eventsApi.generate({
-        ...commonPayload(),
-        dateTarget,
-        excludeIds: args.mode === 'more' ? events.map((e) => e.id) : [],
-        count: args.mode === 'more' ? 6 : 9,
-        plan: args.plan,
-        strictSources,
-      });
+      setProgress({ message: 'Démarrage…', seconds: 0 });
+      return eventsApi.generate(
+        {
+          ...commonPayload(),
+          dateTarget,
+          excludeIds: args.mode === 'more' ? events.map((e) => e.id) : [],
+          count: args.mode === 'more' ? 6 : 9,
+          plan: args.plan,
+          strictSources,
+        },
+        (message, seconds) => setProgress({ message, seconds }),
+      );
     },
+    onSettled: () => setProgress(null),
     onSuccess: (data, args) => {
       setNotice(data.notice);
       setEvents((prev) => (args.mode === 'more' ? [...prev, ...data.events] : data.events));
@@ -558,6 +566,19 @@ export function DiscoveryPage() {
           )}
         </div>
       </Card>
+
+      {progress && (
+        <Alert tone="info" title="Génération en cours">
+          <span className="flex flex-wrap items-center gap-x-2">
+            <span>{progress.message}</span>
+            <span className="tabular-nums text-content-muted">({progress.seconds} s)</span>
+          </span>
+          <p className="mt-1 text-xs text-content-muted">
+            La recherche web prend souvent une à deux minutes. Vous pouvez laisser cette page
+            ouverte.
+          </p>
+        </Alert>
+      )}
 
       {notice && <Alert tone="warning">{notice}</Alert>}
 

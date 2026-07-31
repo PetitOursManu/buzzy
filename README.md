@@ -187,8 +187,8 @@ buzzy/
 | `PORT` | Port d'écoute du serveur | `3000` |
 | `NODE_ENV` | Environnement | `production` |
 | `CORS_ORIGIN` | (Optionnel) origine(s) autorisée(s) en dev | `http://localhost:5173` |
-| `BUZZY_GENERATION_TIMEOUT_MS` | Budget total d'une génération (défaut 150 000) | `180000` |
-| `AI_REQUEST_TIMEOUT_MS` | Délai d'un appel individuel au modèle (défaut 120 000) | `180000` |
+| `BUZZY_GENERATION_TIMEOUT_MS` | Budget total d'une génération en tâche de fond (défaut 240 000) | `360000` |
+| `AI_REQUEST_TIMEOUT_MS` | Délai d'un appel individuel au modèle (défaut 80 000) | `120000` |
 | `MCP_TOOL_TIMEOUT_MS` | Délai d'un appel d'outil MCP (défaut 25 000) | `40000` |
 | `AI_MAX_TOKENS` | Plafond de jetons demandé au modèle (défaut 8 000) | `12000` |
 | `SEARXNG_MCP_URL` | Serveur MCP de recherche pré-enregistré (vide = aucun) | `http://searxng-mcp:8000/mcp` |
@@ -221,7 +221,8 @@ buzzy/
 | PUT / DELETE | `/api/settings/mcp-servers/:id` | Modifie / supprime un serveur MCP |
 | POST | `/api/settings/mcp-servers/:id/test` | Teste la connexion et liste les outils |
 | POST | `/api/events/plan` | Mode planification : renvoie un plan à valider |
-| POST | `/api/events/generate` | Génère de nouveaux événements via l'IA |
+| POST | `/api/events/generate` | Démarre une génération, renvoie `202 { jobId }` |
+| GET | `/api/events/generate/:jobId` | Avancement et résultat de la génération |
 | GET | `/api/events` | Liste les événements (filtres + recherche `q`) |
 | POST | `/api/events/manual` | Crée un événement à la main |
 | PUT / DELETE | `/api/events/:id` | Modifie / supprime un événement |
@@ -323,6 +324,14 @@ Attention : les erreurs de **configuration** ne renvoient pas 502 mais **400**, 
 | `réponse vide` | 502 | Modèle de raisonnement sans sortie exploitable | Autre modèle, ou désactiver le mode de réflexion |
 | `n'a pas renvoyé de JSON exploitable` | 502 | Réponse hors format | La réponse brute du modèle est journalisée : lisez-la |
 
+### 524 — Cloudflare a coupé la requête
+
+Le **524** est propre à Cloudflare : l'origine n'a pas répondu dans les **100 secondes** qu'il accorde, limite **non configurable** hors offre Enterprise.
+
+Aucun réglage applicatif ne peut la contourner. C'est pourquoi la découverte d'événements **ne s'exécute plus dans la requête HTTP** : `POST /api/events/generate` démarre une tâche et répond immédiatement `202 { jobId }` ; le navigateur suit l'avancement via `GET /api/events/generate/:jobId`, par des requêtes qui durent quelques millisecondes. La génération peut alors prendre le temps qu'il faut — l'interface affiche l'étape en cours et le temps écoulé.
+
+Si un 524 apparaît malgré tout, il ne vient pas de la génération mais d'une autre route restée synchrone (plan, reformulation, régénération d'une publication). Celles-ci n'effectuent qu'un seul appel au modèle, borné par `AI_REQUEST_TIMEOUT_MS` (80 s par défaut, sous le plafond de Cloudflare). Un modèle plus lent que cela demande soit un modèle plus rapide, soit un mode de réflexion réduit.
+
 ### 502 de Buzzy, ou 502 du reverse-proxy ?
 
 C'est la distinction décisive, et la console du navigateur ne permet pas de la faire — les deux affichent `502 (Bad Gateway)`. Regardez la **notification dans l'interface** :
@@ -363,6 +372,8 @@ L'onglet **Paramètres → Diagnostic** vérifie en un écran le fournisseur, le
 - **Migrations** : fournies dans `apps/backend/prisma/migrations`. En Docker, `docker-entrypoint.sh` exécute `prisma migrate deploy` avec ré-essais tant que la base n'est pas prête, et diagnostique les erreurs d'authentification au lieu de boucler.
 - **Garde-fous génération** : la génération de calendrier est plafonnée (120 publications) ; le calcul des créneaux de repli est borné à 500 dates.
 - **Servi en une seule image** : en production, Express sert l'API sous `/api` et le frontend buildé (fallback SPA) sur le port `3000`. Les assets hashés sont cachés un an, `index.html` jamais — sans quoi un déploiement continuerait de servir l'ancienne application.
+- **Génération asynchrone** : la découverte d'événements s'exécute hors du cycle requête/réponse. Aucun intermédiaire (Cloudflare, Traefik, nginx) ne peut plus la couper, quelle que soit sa durée. Les tâches vivent en mémoire — Buzzy est mono-instance, et une tâche perdue au redémarrage se relance en un clic ; persister cet état de quelques minutes aurait coûté une table et des migrations.
+- **Empreinte de build** : `/api/health` et *Paramètres → Diagnostic* exposent le commit et l'horodatage du build, seul moyen de confirmer qu'un redéploiement a réellement pris.
 - **Suppression d'événement** : la clé étrangère `Post.relatedEventId` est en `ON DELETE SET NULL`. Les publications survivent donc à la suppression de leur événement ; l'API renvoie le nombre de publications détachées et l'interface le rapporte.
 
 ---

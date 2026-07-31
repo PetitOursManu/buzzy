@@ -160,22 +160,79 @@ export const settingsApi = {
 };
 
 /* ─── Events ───────────────────────────────────────────────────── */
+
+export interface GenerationResult {
+  events: EventItem[];
+  webSearchUsed: boolean;
+  notice: string | null;
+}
+
+interface JobView<T> {
+  id: string;
+  status: 'running' | 'done' | 'error';
+  progress: string;
+  elapsedSeconds: number;
+  result?: T;
+  error?: { message: string; status: number };
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Fréquence d'interrogation : assez vive pour l'affichage, assez rare pour ne rien coûter. */
+const POLL_INTERVAL_MS = 2000;
+/** Garde-fou absolu, au cas où une tâche resterait bloquée côté serveur. */
+const POLL_MAX_MS = 15 * 60 * 1000;
+
 export const eventsApi = {
-  generate: (data: {
-    scopes: EventScope[];
-    regions?: string[];
-    themes: string[];
-    priorityThemes?: string[];
-    dateTarget: DateTarget;
-    excludeIds: string[];
-    count?: number;
-    plan?: string;
-    strictSources?: boolean;
-  }) =>
-    request<{ events: EventItem[]; webSearchUsed: boolean; notice: string | null }>(
-      '/events/generate',
-      { method: 'POST', body: JSON.stringify(data) },
-    ),
+  /**
+   * Lance une génération et suit son avancement.
+   *
+   * La requête HTTP ne fait que DÉMARRER le travail : le laisser courir
+   * jusqu'au bout heurtait la limite de 100 s de Cloudflare (erreur 524), que
+   * rien ne permet de contourner côté application. Le sondage est encapsulé
+   * ici pour que les pages n'aient pas à connaître ce détail.
+   */
+  generate: async (
+    data: {
+      scopes: EventScope[];
+      regions?: string[];
+      themes: string[];
+      priorityThemes?: string[];
+      dateTarget: DateTarget;
+      excludeIds: string[];
+      count?: number;
+      plan?: string;
+      strictSources?: boolean;
+    },
+    onProgress?: (message: string, elapsedSeconds: number) => void,
+  ): Promise<GenerationResult> => {
+    const { jobId } = await request<{ jobId: string }>('/events/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    const startedAt = Date.now();
+    for (;;) {
+      await delay(POLL_INTERVAL_MS);
+      const job = await request<JobView<GenerationResult>>(`/events/generate/${jobId}`);
+
+      if (job.status === 'done' && job.result) return job.result;
+      if (job.status === 'error') {
+        throw new ApiError(
+          job.error?.message ?? 'La génération a échoué.',
+          job.error?.status ?? 502,
+        );
+      }
+      onProgress?.(job.progress, job.elapsedSeconds);
+
+      if (Date.now() - startedAt > POLL_MAX_MS) {
+        throw new ApiError(
+          "La génération dure anormalement longtemps et a été abandonnée côté navigateur.",
+          504,
+        );
+      }
+    }
+  },
   plan: (data: {
     scopes: EventScope[];
     regions?: string[];

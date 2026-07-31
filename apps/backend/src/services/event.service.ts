@@ -35,13 +35,13 @@ const MAX_TOOL_ITERATIONS = 10;
 /**
  * Budget total d'une génération, tous appels confondus.
  *
- * Doit rester INFÉRIEUR au délai de lecture de votre reverse-proxy : sinon
- * c'est lui qui coupe la requête, et l'utilisateur reçoit un 502 nu, sans le
- * message expliquant ce qui s'est passé.
+ * Généreux : la génération tourne en tâche de fond et la requête HTTP a déjà
+ * rendu la main, donc aucun délai de proxy ne s'y applique. Ce budget n'est
+ * plus là que pour éviter une tâche qui ne finirait jamais.
  */
 const GENERATION_TIMEOUT_MS = Math.max(
   20_000,
-  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 150_000,
+  Number.parseInt(process.env.BUZZY_GENERATION_TIMEOUT_MS ?? '', 10) || 240_000,
 );
 
 /**
@@ -62,6 +62,8 @@ export interface GeneratedEventInput {
   plan?: string;
   /** Mode strict : n'accepter que les événements avec au moins un lien qui répond. */
   strictSources?: boolean;
+  /** Compte rendu d'avancement, affiché pendant l'attente. */
+  onProgress?: (message: string) => void;
 }
 
 export interface EventGenerationResult {
@@ -150,6 +152,7 @@ async function runChatWithTools(
   tools: ToolDefinition[],
   lookup: ReturnType<typeof mcpToolsToOpenAI>['lookup'],
   deadline: Deadline,
+  onProgress: (message: string) => void,
 ): Promise<{
   finalText: string;
   toolsUsed: boolean;
@@ -165,6 +168,7 @@ async function runChatWithTools(
     // Sans outils, le modèle ne doit produire QUE du JSON : on peut le lui
     // imposer. Un fournisseur qui refuse `response_format` le fait savoir en
     // 400, et la boucle de retrait des paramètres s'en charge.
+    onProgress('Interrogation du modèle…');
     const res = await chatCompletion(config, {
       messages,
       temperature: 0.8,
@@ -193,6 +197,11 @@ async function runChatWithTools(
       break;
     }
     iterations++;
+    onProgress(
+      iterations === 1
+        ? 'Interrogation du modèle…'
+        : `Recherche web en cours (${iterations - 1} recherche(s) effectuée(s))…`,
+    );
 
     let res;
     try {
@@ -280,6 +289,7 @@ async function runChatWithTools(
 
   // Budget épuisé ou trop d'itérations : on force une réponse finale sans
   // outils, à partir de ce qui a déjà été trouvé.
+  onProgress('Rédaction des événements…');
   // Certains fournisseurs refusent un historique contenant des `tool_calls`
   // si le tableau `tools` n'accompagne pas la requête. On le conserve donc, en
   // interdisant simplement d'en appeler de nouveaux.
@@ -323,6 +333,8 @@ async function runChatWithTools(
 }
 
 export async function generateEvents(input: GeneratedEventInput): Promise<EventGenerationResult> {
+  const progress = input.onProgress ?? (() => undefined);
+  progress('Préparation…');
   const config = await getActiveAiConfig();
 
   // Titres à exclure (déjà affichés).
@@ -343,6 +355,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   const mcpEnabledCount = await prisma.mcpServer.count({ where: { enabled: true } });
   const webSearchRequested = mcpEnabledCount > 0;
 
+  if (webSearchRequested) progress('Connexion aux serveurs de recherche web…');
   const { connections, tools, lookup } = webSearchRequested
     ? await prepareMcpConnections()
     : { connections: [], tools: [], lookup: new Map() };
@@ -374,7 +387,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   let finishReason: string | null = null;
   const deadline = createDeadline(GENERATION_TIMEOUT_MS);
   try {
-    const result = await runChatWithTools(config, messages, tools, lookup, deadline);
+    const result = await runChatWithTools(config, messages, tools, lookup, deadline, progress);
     finalText = result.finalText;
     toolsUsed = result.toolsUsed;
     toolCallingUnsupported = result.toolCallingUnsupported;
@@ -444,6 +457,7 @@ export async function generateEvents(input: GeneratedEventInput): Promise<EventG
   }
   const rawEvents = eventList;
 
+  progress(`Vérification des sources de ${rawEvents.length} événement(s)…`);
   const created: PrismaEvent[] = [];
   let discardedUncertain = 0;
   let discardedUnsourced = 0;

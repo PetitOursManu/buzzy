@@ -12,7 +12,8 @@ import {
   deleteEventsSchema,
 } from './schemas';
 import { generateEvents, planEvents, rephraseEvent } from '../services/event.service';
-import { respondToAiError } from '../lib/ai-errors';
+import { describeAiError, respondToAiError } from '../lib/ai-errors';
+import { getJob, startJob } from '../lib/jobs';
 import type { EventScope, Prisma } from '@prisma/client';
 
 const router = Router();
@@ -158,26 +159,49 @@ router.post('/generate', aiGenerationLimiter, validate(eventGenerateSchema), asy
     strictSources?: boolean;
   };
   const { scopes, regions } = resolveScopesAndRegions(body);
-  try {
-    const result = await generateEvents({
-      scopes,
-      regions,
-      themes: body.themes,
-      priorityThemes: body.priorityThemes ?? [],
-      dateTarget: body.dateTarget,
-      excludeIds: body.excludeIds,
-      count: body.count,
-      plan: body.plan,
-      strictSources: body.strictSources,
+
+  // Réponse immédiate : le travail se poursuit en tâche de fond.
+  //
+  // Une génération dépasse couramment la minute, et tout intermédiaire impose
+  // sa propre limite — Cloudflare coupe à 100 s avec un 524, non configurable
+  // hors offre Enterprise. Tenir la requête ouverte jusqu'au bout était donc
+  // structurellement voué à l'échec, quel que soit le réglage.
+  const jobId = startJob(
+    (progress) =>
+      generateEvents({
+        scopes,
+        regions,
+        themes: body.themes,
+        priorityThemes: body.priorityThemes ?? [],
+        dateTarget: body.dateTarget,
+        excludeIds: body.excludeIds,
+        count: body.count,
+        plan: body.plan,
+        strictSources: body.strictSources,
+        onProgress: progress,
+      }).then((result) => ({
+        events: result.events,
+        webSearchUsed: result.webSearchUsed,
+        notice: result.notice ?? null,
+      })),
+    (error) => describeAiError("génération d'événements", error),
+    'Préparation…',
+  );
+
+  return res.status(202).json({ jobId });
+});
+
+/** Avancement d'une génération lancée. Interrogé en boucle par le client. */
+router.get('/generate/:jobId', (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) {
+    // Tâche inconnue : identifiant erroné, ou serveur redémarré depuis (les
+    // tâches vivent en mémoire).
+    return res.status(404).json({
+      error: "Génération introuvable. Elle a peut-être expiré, ou le serveur a redémarré depuis. Relancez la recherche.",
     });
-    return res.json({
-      events: result.events,
-      webSearchUsed: result.webSearchUsed,
-      notice: result.notice ?? null,
-    });
-  } catch (e) {
-    return respondToAiError(res, "génération d'événements", e);
   }
+  return res.json(job);
 });
 
 router.post('/plan', aiGenerationLimiter, validate(eventPlanSchema), async (req, res) => {
